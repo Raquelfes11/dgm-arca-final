@@ -12,6 +12,10 @@ Run::
 To choose the threshold of the semantic chunking with retrieval numbers, sweep it::
 
     uv run python -m rag.evaluate --gold rag/gold/gold.jsonl --thresholds 0.6 0.7 0.75 0.8 0.85
+
+To see what the query instruction of the embeddings does to retrieval (dense and hybrid)::
+
+    uv run python -m rag.evaluate --gold rag/gold/gold.jsonl --instruction-sweep --lam 0.4
 """
 
 from __future__ import annotations
@@ -210,6 +214,111 @@ def print_threshold_sweep(sweep: dict[str, dict], k: int) -> None:
         )
 
 
+# Instructions to compare for the query embeddings (passages never carry one). ``default`` is the
+# one of ``rag.embed``; ``none`` embeds the bare query; ``unrelated`` is a control that names a
+# task that has nothing to do with retrieval, to see how much the instruction matters at all.
+QUERY_INSTRUCTIONS = {
+    "default": None,
+    "none": "",
+    "domain_en": (
+        "Given a question from a nurse, retrieve the passage of the drug's technical data sheet "
+        "(ficha técnica) that answers it."
+    ),
+    "domain_es": (
+        "Dada una pregunta de un profesional de enfermería, recupera el fragmento de la ficha "
+        "técnica del medicamento que la responde."
+    ),
+    "drug_first": (
+        "Identify the drug the question refers to and retrieve the section of its technical "
+        "data sheet that answers it."
+    ),
+    "unrelated": "Classify the sentiment of the following text.",
+}
+
+
+class _BareQueryEmbedder:
+    """Same passages as ``embedder`` but queries without the ``Instruct: ... Query:`` prompt."""
+
+    def __init__(self, embedder):
+        self.embedder = embedder
+        self.model_id = getattr(embedder, "model_id", "unknown")  # same fingerprint: index reused
+
+    def embed_passages(self, texts, batch_size: int = 32):
+        return self.embedder.embed_passages(texts, batch_size=batch_size)
+
+    def embed_queries(self, texts, instruction=None):
+        return self.embedder.model.encode(texts, normalize_embeddings=True)
+
+
+def instruction_sweep(
+    chunks,
+    embedder,
+    gold: list[dict],
+    instructions: dict[str, str | None],
+    k: int,
+    lam: float,
+    persist_dir: str | Path | None = None,
+) -> dict[str, dict]:
+    """Dense and hybrid retrieval for every query instruction, over the same chunks.
+
+    Passage vectors do not depend on the instruction, so one dense index is built (or loaded
+    from ``persist_dir``) and only ``query_instruction`` changes. Besides the metrics, each
+    entry lists the questions the dense retriever gets right/wrong relative to ``default``.
+    """
+    from rag.retriever import BM25Retriever, DenseRetriever, HybridRetriever
+
+    items = [
+        {**item, "number": number}
+        for number, item in enumerate(resolve_gold(gold, chunks), start=1)
+    ]
+    usable = [it for it in items if it["relevant_chunk_ids"]]
+    bm25 = BM25Retriever(chunks)
+    dense = DenseRetriever(chunks, embedder, persist_dir=persist_dir)
+    hybrid = HybridRetriever(bm25, dense, weight_bm25=lam)
+    bare = DenseRetriever(chunks, _BareQueryEmbedder(embedder), persist_dir=persist_dir)
+    bare_hybrid = HybridRetriever(bm25, bare, weight_bm25=lam)
+
+    sweep: dict[str, dict] = {}
+    failed_by_default: set[int] = set()
+    for name, instruction in instructions.items():
+        if instruction == "":  # no instruction at all
+            d, h = bare, bare_hybrid
+        else:
+            d, h = dense, hybrid
+            dense.query_instruction = instruction  # None -> the default of rag.embed
+        entry = {"instruction": instruction}
+        for rname, retriever in (("dense", d), ("hybrid", h)):
+            metrics = evaluate_retriever(retriever, usable, k)
+            entry[rname] = {**metrics, "all": over_all(metrics, len(gold), k)}
+        failed = {f["number"] for f in failed_questions(d, usable, k)}
+        entry["n_failures_dense"] = len(failed)
+        if name == "default":
+            failed_by_default = failed
+        entry["failed_dense"] = sorted(failed)
+        sweep[name] = entry
+    for entry in sweep.values():
+        failed = set(entry["failed_dense"])
+        entry["gained_vs_default"] = sorted(failed_by_default - failed)
+        entry["lost_vs_default"] = sorted(failed - failed_by_default)
+    dense.query_instruction = None
+    return sweep
+
+
+def print_instruction_sweep(sweep: dict[str, dict], k: int) -> None:
+    key = f"recall@{k}"
+    print(f"\nBarrido de la instrucción de la consulta (denso e híbrido, {key} y MRR):")
+    print(
+        f"{'instrucción':<12} {'denso ' + key:>14} {'denso mrr':>10} {'fallos':>7} "
+        f"{'híbrido ' + key:>16} {'híbrido mrr':>12}  {'gana':<18} pierde (nº de pregunta)"
+    )
+    for name, e in sweep.items():
+        print(
+            f"{name:<12} {e['dense'][key]:>14.3f} {e['dense']['mrr']:>10.3f} "
+            f"{e['n_failures_dense']:>7} {e['hybrid'][key]:>16.3f} {e['hybrid']['mrr']:>12.3f}  "
+            f"{str(e['gained_vs_default']):<18} {e['lost_vs_default']}"
+        )
+
+
 def unresolved_questions(items: list[dict]) -> list[dict]:
     """Gold questions (numbered from 1) whose evidence is not contained in any chunk."""
     unresolved = []
@@ -324,6 +433,15 @@ def main() -> None:
         default=None,
         help="only sweep the semantic threshold over these values (no main table)",
     )
+    parser.add_argument(
+        "--instruction-sweep",
+        action="store_true",
+        help="compare the query instructions of QUERY_INSTRUCTIONS (no main table)",
+    )
+    parser.add_argument(
+        "--instruction-chunking", choices=["recursive", "semantic"], default="recursive"
+    )
+    parser.add_argument("--instruction-out", default="reports/phase3_instruction_sweep.json")
     args = parser.parse_args()
     gold = load_gold(args.gold)
     print(f"{len(gold)} gold questions loaded; results will go to {args.out}")
@@ -338,6 +456,35 @@ def main() -> None:
     documents = load_corpus(Path(args.corpus))
     embedder = Embedder()
 
+    if args.instruction_sweep:
+        if args.instruction_chunking == "recursive":
+            chunks = recursive_chunks(documents)
+        else:
+            chunks = semantic_chunks(
+                documents, embedder.embed_passages, distance_threshold=args.threshold
+            )
+        sweep = instruction_sweep(
+            chunks,
+            embedder,
+            gold,
+            QUERY_INSTRUCTIONS,
+            args.k,
+            args.lam,
+            persist_dir=f"{args.index_dir}/{args.instruction_chunking}",
+        )
+        print_instruction_sweep(sweep, args.k)
+        out = Path(args.instruction_out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "k": args.k,
+            "gold": args.gold,
+            "lam": args.lam,
+            "chunking": args.instruction_chunking,
+            "instruction_sweep": sweep,
+        }
+        out.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(f"\nSaved to {out}")
+        return
     if args.thresholds:
         sweep = threshold_sweep(documents, embedder, gold, args.thresholds, args.k, args.lam)
         print_threshold_sweep(sweep, args.k)

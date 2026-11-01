@@ -1668,3 +1668,156 @@ separar cinco fichas parecidas en el mismo contexto. Habría que entrenar al mod
 aprendiera a citar.
 
 ---
+
+### 2026-11-01 · Fase 3 · ¿Sabe citar el generador? Comparación de cuatro modelos
+
+**Qué queríamos saber.** En la primera prueba de `/rag` nuestro modelo (Qwen3-0.6B con el adaptador
+de la fase 1) no citaba ningún fragmento. Queremos saber si es culpa del entrenamiento (SFT y GRPO
+nos habrían quitado la capacidad de citar) o del tamaño: ¿cita el 0.6B base sin adaptador?, ¿y
+uno mayor? Si el base cita y el nuestro no, hay que arreglar el entrenamiento; si no cita ni el
+base, habría que enseñarle a citar o cambiar de modelo.
+
+**Qué hicimos.** Misma recuperación y mismo prompt para los cuatro: chunking recursivo, híbrido
+con λ = 0.4, `top_k = 5`. Solo cambia el generador, que se elige con las variables de `/rag`.
+`rag/compare_generators.py` genera la respuesta de cada pregunta del gold que tiene fragmento
+relevante (48 de 50; dos no se resuelven con el chunking recursivo) y de 8 preguntas que el
+corpus no puede responder (omeprazol, metformina, atorvastatina, warfarina, diazepam rectal,
+precio de la vancomicina, descubridor de la penicilina, insulina glargina). Decodificación
+greedy, 1024 tokens máximo; los modelos base van sin razonamiento (`enable_thinking=False`) y el
+adaptador con el prompt de sistema R1-Zero de la fase 1.
+
+```bash
+ARCA_RLM_BASE_MODEL=Qwen/Qwen3-0.6B uv run python -m rag.compare_generators --tag qwen3-0.6b-base
+ARCA_RLM_BASE_MODEL=Qwen/Qwen3-0.6B ARCA_RLM_ADAPTER=rlm/weights/final_rlm_lora_sin_kl \
+  uv run python -m rag.compare_generators --tag qwen3-0.6b-rlm
+ARCA_RLM_BASE_MODEL=Qwen/Qwen3-1.7B uv run python -m rag.compare_generators --tag qwen3-1.7b
+ARCA_RLM_BASE_MODEL=Qwen/Qwen3-4B   uv run python -m rag.compare_generators --tag qwen3-4b
+```
+
+Las respuestas completas están en `reports/rag/generators/<tag>.json`. El script no carga el
+`.env`, así que el adaptador solo se aplica donde se indica (el campo `model` de cada JSON lo
+confirma). Una respuesta "cita" si contiene algún id entre corchetes que existe entre los cinco
+fragmentos devueltos. El reparto de las respuestas sin cita usa un detector de abstención por
+expresiones regulares, que es orientativo.
+
+**Qué pasó.** En 35 de las 48 preguntas el fragmento correcto estaba entre los cinco recuperados,
+igual para los cuatro modelos.
+
+| Modelo | Cita algo | Cita el fragmento correcto | Sin cita: abstención | Sin cita: fragmento correcto no recuperado | Sin cita: fragmento correcto recuperado | Ids inventados | Preguntas sin respuesta que citan |
+|---|---|---|---|---|---|---|---|
+| Qwen3-0.6B base | 17/48 (35 %) | 14 | 12 | 4 | 15 | 0 | 0/8 |
+| Qwen3-0.6B + adaptador (el nuestro) | 14/48 (29 %) | 10 | 9 | 6 | 19 | 0 | 1/8 |
+| Qwen3-1.7B base | 38/48 (79 %) | 26 | 6 | 1 | 3 | 0 | 3/8 |
+| Qwen3-4B base | 45/48 (94 %) | 33 | 3 | 0 | 0 | 0 | 2/8 |
+
+Cuando el fragmento correcto está entre los recuperados, el modelo lo cita en 14 de 35 casos
+(0.6B base), 10 (0.6B con adaptador), 26 (1.7B) y 33 (4B).
+
+Lo que se ve al leer las respuestas:
+
+- **0.6B base.** Cita poco y mal. Cuando cita, a veces copia la cabecera del contexto
+  (`[id] (from fichero.md)`) en vez de citar al final de la afirmación. Mezcla fármacos (habla de
+  abrocitinib y fluconazol en una pregunta de meropenem), inventa cifras (dexketoprofeno a
+  "1,4 microgramos/kg/h") y se abstiene en inglés.
+- **0.6B con adaptador.** Un poco peor que el base. En 9 de 48 respuestas el bloque `<think>` queda
+  dentro de la respuesta (la extracción con `split_thinking` no lo aísla) y, en el caso que revisamos
+  (diazepam rectal), las citas salen del razonamiento y no de la respuesta. Dice que la información no incluye "quién descubrió la penicilina" y a continuación
+  responde "Alexander Fleming en 1928" con conocimiento propio.
+- **1.7B.** Cita en cuatro de cada cinco respuestas. Las sin cita son abstenciones o preguntas donde
+  el fragmento correcto no se recuperó; solo 3 no citan teniendo el fragmento. En atorvastatina y
+  warfarina, que el corpus no responde, cita un fragmento lateral y contesta con conocimiento propio.
+- **4B.** Cita en 45 de 48 y casi siempre el fragmento correcto cuando lo tiene. Las tres sin cita
+  son abstenciones. En 6 de las 8 preguntas sin respuesta no cita nada y dice que la información no
+  está. En warfarina cita fragmentos y explica el INR, y en
+  diazepam rectal dice que no hay dosis pediátrica pero cita un fragmento relacionado.
+
+Ningún modelo inventa ids. La comprobación de que los ids existen siempre se cumple, pero
+**no garantiza que la afirmación esté en el fragmento citado**: el 1.7B y el 4B citan en preguntas
+que el corpus no responde y el 0.6B con adaptador responde fuera del corpus. Citar es necesario y
+no basta.
+
+**Qué concluimos.**
+
+1. **El SFT y el GRPO no nos han quitado la capacidad de citar: el 0.6B base ya apenas citaba**
+   (35 % frente a 29 %). La diferencia entre ambos es pequeña con 48 preguntas y una sola
+   ejecución, así que no la interpretamos. Lo que sí hace el adaptador es empeorar otras cosas:
+   filtra el razonamiento en la respuesta y contesta fuera del corpus.
+2. **El factor determinante es el tamaño.** Con el mismo prompt, citar pasa de 35 % (0.6B) a 79 %
+   (1.7B) y 94 % (4B). El 0.6B no es capaz de seguir "cita los pasajes que uses" aunque el
+   fragmento esté delante (15 casos sin cita con el fragmento recuperado), mientras que el 4B
+   falla en 0.
+3. **Hay que cambiar el generador de `/rag`, no entrenar al 0.6B.** Qwen3-4B es el que cumple lo
+   que pide el README: cita, las citas existen y casi siempre apoyan la respuesta. Por lo tanto, para que el modelo cite correctamente deberíamos hacer SFT sobre un modelo que ya sepa citar, uno más grande que el de 0.6B. Para ello, habría que volver a hacer la fase 1 con un modelo más grande como el 4B. Para cambiarlo en las pruebas solo hay que poner
+   `ARCA_RLM_BASE_MODEL=Qwen/Qwen3-4B` y dejar `ARCA_RLM_ADAPTER` vacío.
+4. **Parte de las respuestas sin cita no son culpa del generador.** Con los modelos grandes lo que
+   queda sin citar es sobre todo abstención o fragmento no recuperado. Los fallos de recuperación
+   se concentran en conservación, periodo de validez y envases, donde el texto del fragmento no
+   contiene el nombre del fármaco (`6.3 Periodo de validez | Antes de la apertura: 3 años…` es
+   casi igual en las 47 fichas). Habría que ver si poniendo el
+   nombre del fármaco en la cabecera del chunk, reembebebiendo y repetitiendo `rag.evaluate` los resultados mejoran.
+
+---
+
+### 2026-11-01 · Fase 3 · Instrucción de la consulta en los embeddings
+
+**Qué queríamos saber.** Qwen3-Embedding se entrena con una instrucción de tarea delante de la
+consulta (`Instruct: ...\nQuery: ...`) y los pasajes se embeben sin ella. Hasta ahora usábamos la
+instrucción por defecto de `rag/embed.py`. Queremos saber cuánto cambia la recuperación si la
+cambiamos, si una instrucción adaptada a nuestro dominio (fichas técnicas, enfermería) la mejora
+y qué pasa sin instrucción o con una que no tiene que ver con la tarea.
+
+**Qué hicimos.** `instruction_sweep` en `rag/evaluate.py`. Los vectores de los pasajes no dependen
+de la instrucción, así que se carga el índice denso persistido y solo cambia `query_instruction`
+(sin reembeber el corpus). Chunking recursivo, λ = 0.4 para el híbrido, k = 5 y las 48 preguntas
+del gold con fragmento resuelto. Se compararon seis instrucciones (`QUERY_INSTRUCTIONS`):
+`default`; `none` (la consulta sin el prefijo `Instruct:`); `domain_en` y `domain_es`
+(fragmento de la ficha técnica que responde a una pregunta de enfermería, en inglés y en español);
+`drug_first` (identificar primero el fármaco y recuperar la sección de su ficha) y `unrelated`
+("Classify the sentiment of the following text."), un control que no tiene que ver con recuperar.
+
+```bash
+uv run python -m rag.evaluate --gold rag/gold/gold.jsonl --k 5 --lam 0.4 --instruction-sweep
+```
+
+Resultados completos en `reports/phase3_instruction_sweep.json`. "Gana/pierde" son los números de
+pregunta (desde 1) que el denso acierta/falla respecto a `default`.
+
+**Qué pasó.**
+
+| Instrucción | Denso Recall@5 | Denso MRR | Fallos (denso) | Híbrido Recall@5 | Híbrido MRR | Gana | Pierde |
+|---|---|---|---|---|---|---|---|
+| default | 0.642 | 0.568 | 13 | 0.642 | 0.632 | | |
+| none | 0.653 | 0.605 | 12 | 0.663 | 0.652 | 3, 30 | 46 |
+| domain_en | 0.580 | 0.523 | 16 | 0.611 | 0.593 | 30 | 24, 31, 46, 49 |
+| domain_es | 0.590 | 0.553 | 16 | 0.622 | 0.622 | 30 | 21, 31, 46, 49 |
+| drug_first | 0.569 | 0.551 | 17 | 0.622 | 0.601 | | 24, 31, 46, 49 |
+| unrelated | 0.000 | 0.000 | 48 | 0.000 | 0.000 | | 35 preguntas |
+
+- **Quitar la instrucción cambia poco.** `default` y `none` quedan dentro de un punto de Recall@5
+  (0.642 y 0.653 en denso): una pregunta de diferencia sobre 48.
+- **Las instrucciones de dominio empeoran, no mejoran.** `domain_en`, `domain_es` y `drug_first`
+  bajan el denso 5-7 puntos (de 13 a 16-17 fallos) y las tres pierden las preguntas 31, 46 y 49
+  (más la 24, o la 21 en `domain_es`); en el híbrido bajan 2-3 puntos. Esperábamos lo contrario.
+- **El control hunde la recuperación.** Con la instrucción de sentimiento, los fragmentos mejor
+  puntuados de una consulta tienen todos la misma similitud (0.547 en el caso que miramos), es
+  decir, el vector de la consulta deja de depender de la pregunta y el ranking es casi constante.
+  El híbrido también cae a 0. Creemos que es porque, con las puntuaciones del denso empatadas, el
+  reescalado a [0, 1] da 1 a los 20 fragmentos del denso y BM25 no consigue sacar a ninguno de los
+  suyos por encima; no lo hemos comprobado.
+
+**Qué concluimos.**
+
+1. **La instrucción importa, pero quitarla apenas cambia el resultado.** La diferencia entre
+   `default` y `none` es de una pregunta y no la interpretamos con 48 preguntas y una sola
+   ejecución. Lo que sí es claro es el efecto del control, que confirma que la instrucción
+   participa de verdad en el vector de la consulta.
+2. **Nuestra hipótesis de que una instrucción de dominio ayudaría no se cumple.** Las tres que
+   mencionan fichas técnicas o el fármaco pierden las preguntas 31, 46 y 49. La 31 (y la 24 y la
+   21 en alguna de ellas) son de "varios medicamentos", con dos fármacos en la consulta; la 46 es
+   de premisa dudosa (amikacina y embarazo) y la 49 de cálculo. Nuestra explicación tentativa es que una instrucción que pide "el fragmento de
+   la ficha" o "identificar el fármaco" empuja la consulta hacia un solo fármaco o hacia el estilo de
+   ficha y se pierde el segundo. No lo hemos comprobado mirando los fragmentos recuperados.
+3. **No cambiamos la instrucción de `/rag`.** `none` sale unas décimas por encima, pero la mejora
+   no se distingue de una pregunta más. Dejamos la de por defecto, la que viene en `rag/embed.py`.
+
+---
