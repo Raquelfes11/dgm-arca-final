@@ -104,6 +104,10 @@ class RagResponse(BaseModel):
     answer: str
     chunks: list[RetrievedChunk]
     citations: list[str] = Field(default_factory=list, description="Chunk ids cited in the answer.")
+    invalid_citations: list[str] = Field(
+        default_factory=list,
+        description="Ids in square brackets in the answer that are not among the returned chunks.",
+    )
     retriever: Literal["dense", "bm25", "hybrid"]
     model: str = ""
 

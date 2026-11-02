@@ -1528,8 +1528,8 @@ carbapenems) aunque no lo hemos verificado pregunta a pregunta. Los dos chunking
 empatados en MRR. Sin embargo, el recursivo tiene mejor recall y una pregunta menos sin resolver, así que
 **`/rag` usa chunking recursivo e híbrido con λ = 0.4**. Elegimos λ por MRR porque el endpoint
 devuelve pocos fragmentos y lo que importa es que el bueno salga primero. El análisis de las preguntas que
-fallan, por categoría del gold, está en la entrada siguiente. Queda pendiente probar otras
-instrucciones de embedding.
+fallan, por categoría del gold, está en la entrada siguiente. La comparación de instrucciones
+de embedding está en la entrada del 2026-11-01 (Instrucción de la consulta en los embeddings).
 
 ---
 
@@ -1706,12 +1706,18 @@ igual para los cuatro modelos.
 | Modelo | Cita algo | Cita el fragmento correcto | Sin cita: abstención | Sin cita: fragmento correcto no recuperado | Sin cita: fragmento correcto recuperado | Ids inventados | Preguntas sin respuesta que citan |
 |---|---|---|---|---|---|---|---|
 | Qwen3-0.6B base | 17/48 (35 %) | 14 | 12 | 4 | 15 | 0 | 0/8 |
-| Qwen3-0.6B + adaptador (el nuestro) | 14/48 (29 %) | 10 | 9 | 6 | 19 | 0 | 1/8 |
+| Qwen3-0.6B + adaptador (el nuestro), 1024 tokens | 6/48 (12,5 %) | 5 | 9 | 6 | 18 | 0 | 0/6 |
+| Qwen3-0.6B + adaptador (el nuestro), 1536 tokens | 5/48 (10,4 %) | 3 | 8 | 8 | 22 | 0 | 0/8 |
 | Qwen3-1.7B base | 38/48 (79 %) | 26 | 6 | 1 | 3 | 0 | 3/8 |
 | Qwen3-4B base | 45/48 (94 %) | 33 | 3 | 0 | 0 | 0 | 2/8 |
 
+*Fila del adaptador corregida (ver la entrada "Las citas eran ids del razonamiento"): 9 de las 48
+respuestas con fragmento y 2 de las 8 sin respuesta se truncaron dentro del razonamiento (1024
+tokens) y no cuentan como respuesta, por eso las 33 sin cita no suman 42 y las preguntas sin
+respuesta son 6. Antes de corregirlo la tabla decía 14/48 (29 %), 10, 9, 6, 19 y 1/8.*
+
 Cuando el fragmento correcto está entre los recuperados, el modelo lo cita en 14 de 35 casos
-(0.6B base), 10 (0.6B con adaptador), 26 (1.7B) y 33 (4B).
+(0.6B base), 5 y 3 (0.6B con adaptador, con 1024 y 1536 tokens), 26 (1.7B) y 33 (4B).
 
 Lo que se ve al leer las respuestas:
 
@@ -1719,9 +1725,9 @@ Lo que se ve al leer las respuestas:
   (`[id] (from fichero.md)`) en vez de citar al final de la afirmación. Mezcla fármacos (habla de
   abrocitinib y fluconazol en una pregunta de meropenem), inventa cifras (dexketoprofeno a
   "1,4 microgramos/kg/h") y se abstiene en inglés.
-- **0.6B con adaptador.** Un poco peor que el base. En 9 de 48 respuestas el bloque `<think>` queda
-  dentro de la respuesta (la extracción con `split_thinking` no lo aísla) y, en el caso que revisamos
-  (diazepam rectal), las citas salen del razonamiento y no de la respuesta. Dice que la información no incluye "quién descubrió la penicilina" y a continuación
+- **0.6B con adaptador.** Peor que el base. En 9 de 48 respuestas el razonamiento se corta a los
+  1024 tokens sin llegar a la respuesta, y esas respuestas devolvían el razonamiento como si fuera
+  la respuesta, con sus ids contados como citas (ver la entrada siguiente a esta). Dice que la información no incluye "quién descubrió la penicilina" y a continuación
   responde "Alexander Fleming en 1928" con conocimiento propio.
 - **1.7B.** Cita en cuatro de cada cinco respuestas. Las sin cita son abstenciones o preguntas donde
   el fragmento correcto no se recuperó; solo 3 no citan teniendo el fragmento. En atorvastatina y
@@ -1738,10 +1744,13 @@ no basta.
 
 **Qué concluimos.**
 
-1. **El SFT y el GRPO no nos han quitado la capacidad de citar: el 0.6B base ya apenas citaba**
-   (35 % frente a 29 %). La diferencia entre ambos es pequeña con 48 preguntas y una sola
-   ejecución, así que no la interpretamos. Lo que sí hace el adaptador es empeorar otras cosas:
-   filtra el razonamiento en la respuesta y contesta fuera del corpus.
+1. **El 0.6B base ya citaba poco (35 %), y con el adaptador cita bastante menos (10-12 %).**
+   Nuestra primera lectura, que el SFT y el GRPO no habían empeorado la capacidad de citar, se
+   apoyaba en una cifra inflada: el 29 % incluía ids mencionados mientras razonaba. Con la cifra
+   corregida el adaptador queda por debajo del base, y la caída no se explica solo porque el
+   razonamiento se trunque: con 1536 tokens terminan 43 de 48 respuestas y solo 5 citan (12 %)
+   frente al 35 % del base (ver la entrada siguiente). Es una diferencia sobre 48 preguntas y
+   una ejecución, así que la damos como indicio y no como medida.
 2. **El factor determinante es el tamaño.** Con el mismo prompt, citar pasa de 35 % (0.6B) a 79 %
    (1.7B) y 94 % (4B). El 0.6B no es capaz de seguir "cita los pasajes que uses" aunque el
    fragmento esté delante (15 casos sin cita con el fragmento recuperado), mientras que el 4B
@@ -1754,7 +1763,7 @@ no basta.
    se concentran en conservación, periodo de validez y envases, donde el texto del fragmento no
    contiene el nombre del fármaco (`6.3 Periodo de validez | Antes de la apertura: 3 años…` es
    casi igual en las 47 fichas). Habría que ver si poniendo el
-   nombre del fármaco en la cabecera del chunk, reembebebiendo y repetitiendo `rag.evaluate` los resultados mejoran.
+   nombre del fármaco en la cabecera del chunk, reembebiendo y repitiendo `rag.evaluate` los resultados mejoran.
 
 ---
 
@@ -1819,5 +1828,90 @@ pregunta (desde 1) que el denso acierta/falla respecto a `default`.
    ficha y se pierde el segundo. No lo hemos comprobado mirando los fragmentos recuperados.
 3. **No cambiamos la instrucción de `/rag`.** `none` sale unas décimas por encima, pero la mejora
    no se distingue de una pregunta más. Dejamos la de por defecto, la que viene en `rag/embed.py`.
+
+---
+
+### 2026-11-02 · Fase 3 · Las citas del RLM eran ids que mencionaba mientras razonaba
+
+**Qué queríamos saber.** La tabla de la entrada anterior daba al RLM un 29 % de respuestas con
+cita, pero al leer sus respuestas varias empezaban por `<think> Vale, voy a resolverlo paso a
+paso…`. Queríamos saber de dónde salían esas citas y si eran citas de la respuesta o no.
+
+**Qué vimos.** Las respuestas del RLM con `<think>` en el texto son 11 de las 56 generadas (9 de
+las 48 con fragmento y 2 de las 8 sin respuesta). Todas miden entre 1021 y 1024 tokens, mientras que
+el resto no pasa de 328. `MAX_NEW_TOKENS` era 1024: el modelo se quedaba sin tokens **antes de cerrar
+el razonamiento**, sin `</think>` ni `<answer>`. Entonces `split_thinking` (`rlm/inference.py`) no
+encuentra un bloque de razonamiento completo y, por diseño, devuelve todo el texto como respuesta. El
+razonamiento truncado acababa siendo la respuesta de `/rag`, y `extract_citations` contaba como
+citas los ids que el modelo mencionaba al razonar ("…el parágrafo [dd4c9e923a-0010], que dice…"). De
+esas 11, 9 tenían citas. No era un fallo de `split_thinking`: es un caso que el código no
+distinguía de una respuesta normal.
+
+Una cita tiene que salir de la respuesta, no del razonamiento. Con las respuestas truncadas tratadas
+como "sin respuesta", el RLM cita en 6 de 48 preguntas (12,5 %) y no en 14 (29 %), y cita el
+fragmento correcto en 5 y no en 10. Lo recalculamos sobre las respuestas ya guardadas, sin generar de
+nuevo, y corregimos la fila del RLM en la entrada anterior.
+
+**Qué hicimos.** Cuatro cambios, los tres primeros en `rag/generate.py`:
+
+1. `final_answer(raw)`: si la generación tiene `<think>` pero no `</think>`, se cortó razonando y no
+   hay respuesta; devuelve `TRUNCATED_ANSWER` ("No se pudo completar la respuesta: el razonamiento
+   del modelo se truncó.") en vez de una cadena vacía, para que se vea que falló. En el resto de
+   casos usa `split_thinking` como antes. Solo se aplica con adaptador.
+2. `MAX_NEW_TOKENS` de 1024 a 1536 (un 50 % más), para que al RLM le dé tiempo a cerrar el
+   razonamiento.
+3. `check_citations(answer, valid_ids)` separa los ids entre corchetes en válidos e inválidos
+   (los que no están entre los fragmentos devueltos, ya sean ids inventados u otro texto entre
+   corchetes como `[1]`). `extract_citations` pasa a usarla, con la misma firma y resultado.
+4. `RagResponse` en `api/schemas.py` gana el campo opcional `invalid_citations: list[str]`
+   (vacío por defecto, no cambia lo que la API devolvía) y `to_response` lo rellena, además de
+   escribir un aviso en el log cuando hay inválidos. Hasta ahora un id inventado se descartaba sin
+   dejar rastro.
+
+**Qué pasó con 1536 tokens.** Repetimos solo el RLM con el cambio
+(`reports/rag/generators/qwen3-0.6b-rlm-1536.json`):
+
+| RLM | Truncadas | Cita algo | Cita el fragmento correcto | Sin cita entre las que terminan |
+|---|---|---|---|---|
+| 1024 tokens (recalculado) | 9 de 48 (y 2 de 8 sin respuesta) | 6/48 (12,5 %) | 5 | 33 de 39 |
+| 1536 tokens | 5 de 48 (y 0 de 8 sin respuesta) | 5/48 (10,4 %) | 3 | 38 de 43 |
+
+Seis de las nueve respuestas truncadas con 1024 tokens terminan ahora (tres de ellas citan), pero
+dos de las que terminaban pasan a truncarse, de ahí 9 → 5. Y el total de citas, que parece estable
+(6 frente a 5), esconde mucho cambio: de las 6 preguntas que citaban con 1024 tokens, solo 2
+vuelven a citar. De las 39 respuestas que ya terminaban con 1024 tokens, 33 tienen un texto
+distinto al repetir, aunque la decodificación sea greedy (6 salen idénticas). La generación del RLM
+no es reproducible entre ejecuciones, algo que ya vimos al llamar dos veces a la API con la misma
+pregunta, y no hemos investigado la causa. Ya no queda ningún `<think>` suelto en las respuestas.
+Los ids inventados siguen siendo 0 y ninguna de las 8 preguntas sin respuesta cita.
+
+Comprobamos que la API sigue funcionando: los tests pasan, los tres retrievers de
+`POST /rag` responden con el campo nuevo y un retriever inválido sigue dando 422. Los resultados de
+recuperación no cambian (`reports/phase3_eval.json`, el barrido del umbral y el de instrucciones
+salen idénticos) y los tres modelos sin adaptador no se ven afectados: sus respuestas más largas son
+de 296, 686 y 750 tokens, por debajo del límite antiguo.
+
+**Qué concluimos.**
+
+1. **La cifra de citas del RLM estaba inflada.** Más de la mitad de las citas que contaba (8 de las 14
+   respuestas con cita eran de respuestas truncadas) venían del razonamiento. Con el límite de 1024
+   tokens el RLM cita en el 12,5 % de las preguntas, frente al 35 % del 0.6B base.
+2. **Cambia una conclusión de la entrada anterior.** Allí decíamos que el SFT y el GRPO no nos habían
+   quitado la capacidad de citar. Con la cifra corregida el adaptador cita menos que el base, y la
+   ejecución con 1536 tokens indica que no es solo el truncamiento: con casi todas las respuestas
+   terminadas (43 de 48) cita el 12 %, frente al 35 % del base. Lo más probable es que el adaptador,
+   entrenado para devolver un número en `<answer>`, haya perdido parte de la tendencia a citar; no
+   lo hemos aislado (haría falta el mismo prompt con el adaptador desactivado y la misma plantilla
+   de razonamiento, y más preguntas).
+3. **Un id entre corchetes no es una cita.** La comprobación automática que ya había (el id existe
+   entre los fragmentos devueltos) no distingue dónde lo escribió el modelo. Ahora solo se mira el
+   texto de la respuesta, pero seguimos sin comprobar que la afirmación esté en el fragmento
+   citado; para eso haría falta un modelo juez.
+
+**Limitaciones.** Como la generación no es reproducible, las cifras de citas de cualquiera de los
+cuatro modelos (no solo el RLM) llevan un ruido que no hemos medido; no hemos repetido ninguna
+ejecución varias veces. El recálculo con 1024 tokens usa las respuestas ya guardadas y trata las truncadas
+como "sin respuesta", sin volver a generar. El detector de abstención sigue siendo una expresión
+regular. 48 preguntas y una sola ejecución.
 
 ---
