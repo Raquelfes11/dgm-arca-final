@@ -430,3 +430,28 @@ def test_three_retrievers_find_the_matching_chunk():
             hits = retriever.search("conservar insulina nevera", top_k=3)
             assert hits[0].chunk.id == "c1", (name, weight)
     assert BM25Retriever([]).search("insulina") == []
+
+
+# ------------------------------------------------------------------- instruction sweep
+
+
+def test_instruction_sweep_changes_only_the_query_instruction():
+    from rag.evaluate import instruction_sweep
+
+    embedder = FakeEmbedder()
+
+    class _Model:  # same vocabulary as the embedder, so vectors are comparable
+        def encode(self, texts, normalize_embeddings=True):
+            return np.stack([embedder._vector(t) for t in texts])
+
+    embedder.model = _Model()
+    gold = [{"question": "insulina nevera", "evidence": CORPUS["c1"]}]
+    instructions = {"default": None, "custom": "Otra instruccion", "none": ""}
+
+    sweep = instruction_sweep(_chunks(), embedder, gold, instructions, k=1, lam=0.5)
+
+    assert list(sweep) == ["default", "custom", "none"]
+    assert embedder.passage_calls == 2  # the dense index is shared; the bare one is its own
+    assert embedder.instructions == [DEFAULT_QUERY_INSTRUCTION, "Otra instruccion"]
+    assert all(e["dense"]["recall@1"] == 1.0 for e in sweep.values())
+    assert sweep["custom"]["gained_vs_default"] == sweep["custom"]["lost_vs_default"] == []

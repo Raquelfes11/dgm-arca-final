@@ -1388,3 +1388,530 @@ Tras escribir y responder las preguntas, se ajustó la evidencia al tamaño de c
 **Qué concluimos.** Con este conjunto ya podemos medir la recuperación (recall@k y MRR) por categoría y no solo en global. Hay dos precauciones. Con 50 preguntas, las categorías pequeñas (3 de premisa dudosa, 3 de cálculo) dan resultados anecdóticos, así que se interpretarán como casos y no como porcentajes. Siguiente paso: evaluar las dos estrategias de chunking y los tres retrievers.
 
 ---
+
+### 2026-10-29 · Fase 3 · Elección del umbral del chunking semántico
+
+**Qué queríamos saber.** Qué umbral de distancia coseno usar en `semantic_chunks` para poder
+compararlo con el chunking recursivo y fijarlo en `rag/generate.py`.
+
+**Qué hicimos.** Primero miramos la distribución de las distancias entre frases consecutivas de
+todo el corpus y la gráfica de un documento (ceftriaxona), con el barrido que propone el
+docstring de `rag/chunking.py` (0.15 a 0.4, con 0.25 por defecto). Sin embargo, 0.25 de threshold era demasiado bajo y troceaba practicamente por frases. Por lo tanto, probamos con un threshold más alto con el siguiente comando:
+
+```bash
+uv run python -m rag.chunking --doc ceftriaxona --sweep 0.15 0.2 0.25 0.3 0.4 0.5 0.6 0.7 0.75 0.8 0.85 --threshold 0.75 --out reports/rag/chunking_distances.png
+```
+
+Después medimos la recuperación con cada umbral sobre el conjunto dorado: para cada umbral se
+trocea el corpus, se construyen los tres retrievers (λ = 0.5 en el híbrido) y se calculan
+Recall@5 y MRR sobre las 50 preguntas. Una pregunta cuya evidencia no cabe entera en ningún
+chunk cuenta como fallo. Embeddings con Qwen3-Embedding-0.6B y `max_chunk_chars=1500`:
+
+```bash
+uv run python -m rag.evaluate --gold rag/gold/gold.jsonl --k 5 --thresholds 0.5 0.6 0.65 0.7 0.75 0.8 0.85 0.9 --out reports/phase3_threshold_sweep.json
+```
+
+El mismo comando cuenta también por qué se cierra cada chunk: por superar el umbral (corte
+semántico), por superar los 1500 caracteres (corte por tamaño) o por empezar una sección nueva
+(846 secciones). Por eso, en cada umbral, chunks = 846 + cortes semánticos + cortes por tamaño.
+
+**Qué pasó.** Las distancias en nuestro corpus son altas: p10 = 0.26, p25 = 0.39, p50 = 0.51,
+p75 = 0.65, p90 = 0.74, p95 = 0.78. Con los umbrales de ejemplo del docstring de `chunking.py` (0.15–0.4) salen entre
+11 000 y 14 000 chunks de unos 130 caracteres de media: prácticamente una frase por chunk.
+
+![Distancia entre frases consecutivas de la ficha de ceftriaxona, con el umbral 0.75](../reports/rag/chunking_distances.png)
+
+La gráfica no muestra picos aislados que separen temas: la distancia oscila entre 0.1 y 0.9
+dentro de todas las secciones y los inicios de sección (líneas grises) no coinciden con los
+picos. Las fichas técnicas cambian de tema de una frase a otra (listas de reacciones adversas,
+tablas de dosis), así que el umbral no se puede elegir a ojo y lo elegimos con el barrido:
+
+| Umbral | Chunks | Media (car.) | Sin resolver | Cortes semánticos | Cortes por tamaño | Dense Recall@5 / MRR | Hybrid Recall@5 / MRR |
+|---|---|---|---|---|---|---|---|
+| 0.50 | 8272 | 198 | 16 | 7414 | 12 | 0.350 / 0.311 | 0.370 / 0.343 |
+| 0.60 | 5630 | 272 | 12 | 4731 | 53 | 0.433 / 0.428 | 0.447 / 0.458 |
+| 0.65 | 4388 | 338 | 10 | 3434 | 108 | 0.473 / 0.457 | 0.458 / 0.442 |
+| 0.70 | 3334 | 433 | 5 | 2258 | 230 | 0.548 / 0.535 | 0.548 / 0.513 |
+| **0.75** | **2406** | **585** | **3** | **1171** | **389** | **0.543 / 0.567** | **0.568 / 0.592** |
+| 0.80 | 1825 | 758 | 2 | 444 | 535 | 0.578 / 0.569 | 0.588 / 0.591 |
+| 0.85 | 1563 | 879 | 1 | 102 | 615 | 0.643 / 0.617 | 0.653 / 0.632 |
+| 0.90 | 1496 | 916 | 1 | 12 | 638 | 0.653 / 0.607 | 0.653 / 0.628 |
+
+"Sin resolver" son las preguntas del gold cuya evidencia no está entera en ningún chunk. Como
+referencia, el chunking recursivo (`chunk_size=800`) da 2626 chunks de 556 caracteres de media:
+800 es el tamaño máximo, y las secciones cortas y los finales de sección dan chunks menores.
+
+**Qué concluimos.** Elegimos **0.75**, sabiendo que no es el umbral con mejores números: 0.85 y
+0.9 tienen unos 0.06–0.09 más de Recall@5 (3–4 preguntas de 50) y algo más de MRR. No los
+elegimos porque en ellos el criterio semántico casi no actúa: a partir de 0.8 los cortes por
+tamaño superan a los semánticos, y en 0.85 y 0.9 quedan 102 y 12 cortes semánticos frente a más
+de 600 por tamaño. Es decir, eso ya no es chunking semántico sino trocear cada sección cada 1500
+caracteres, y la mejora se explica porque los chunks son más grandes: es más fácil que contengan
+la evidencia entera (hay menos preguntas sin resolver) y hay menos chunks entre los que elegir.
+Además, chunks de 900 caracteres meten más texto irrelevante en el prompt de generación. 0.75 es
+el umbral más alto en el que el criterio semántico sigue haciendo la mayor parte de los cortes,
+empata en MRR del híbrido con 0.8 y tiene una longitud media (585) parecida a la del recursivo
+(556), lo que hace justa la comparación entre los dos chunkings. Con 50 preguntas, la diferencia
+entre 0.75 y 0.8 (unas 2 preguntas) no es significativa.
+
+---
+
+### 2026-10-29 · Fase 3 · Chunking recursivo frente a semántico, tres retrievers y barrido de λ
+
+**Qué queríamos saber.** Qué chunking y qué retriever recuperan mejor sobre el conjunto dorado,
+y qué λ usar en el híbrido.
+
+**Qué hicimos.** `rag/evaluate.py` trocea el corpus con las dos estrategias: recursivo
+(`chunk_size=800`, `overlap=100`) y semántico (umbral 0.75), ambos por secciones y con el
+encabezado de la sección delante de cada chunk. Para cada una construye BM25, denso
+(Qwen3-Embedding-0.6B con la instrucción por defecto) e híbrido. Como los ids de los chunks
+cambian con la estrategia, los fragmentos relevantes de cada pregunta se calculan buscando la
+evidencia del gold dentro del texto de los chunks. Con eso calcula Recall@5 y MRR de cada
+retriever y repite el híbrido con λ de 0 a 1 en pasos de 0.1:
+
+```bash
+uv run python -m rag.evaluate --gold rag/gold/gold.jsonl --k 5 --out reports/phase3_eval.json
+```
+
+**Qué pasó.** Todas las métricas son sobre las preguntas resueltas, las que tienen algún chunk
+que contiene su evidencia: 48 en recursivo y 47 en semántico. Barrido de λ del híbrido (peso de BM25; λ = 0 es el denso solo y λ = 1 es BM25
+solo), con el mejor λ de cada chunking en negrita:
+
+| λ | 0.0 | 0.1 | 0.2 | 0.3 | 0.4 | 0.5 | 0.6 | 0.7 | 0.8 | 0.9 | 1.0 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Recursivo Recall@5 | 0.642 | 0.642 | 0.642 | 0.642 | **0.642** | 0.611 | 0.569 | 0.503 | 0.465 | 0.444 | 0.424 |
+| Recursivo MRR | 0.568 | 0.577 | 0.593 | 0.612 | **0.632** | 0.616 | 0.502 | 0.481 | 0.445 | 0.413 | 0.394 |
+| Semántico Recall@5 | 0.578 | 0.578 | 0.578 | **0.583** | 0.583 | 0.605 | 0.594 | 0.514 | 0.486 | 0.454 | 0.475 |
+| Semántico MRR | 0.603 | 0.616 | 0.627 | **0.647** | 0.637 | 0.630 | 0.539 | 0.497 | 0.447 | 0.425 | 0.417 |
+
+Resultados de cada retriever, con el híbrido en λ = 0.5 y en el mejor λ:
+
+| Chunking | Chunks | Media | Sin resolver | BM25 Recall@5 / MRR | Dense Recall@5 / MRR | Hybrid λ=0.5 Recall@5 / MRR | Mejor λ | Hybrid mejor λ Recall@5 / MRR |
+|---|---|---|---|---|---|---|---|---|
+| Recursivo | 2626 | 556 | 2 (14, 44) | 0.424 / 0.394 | 0.642 / 0.568 | 0.611 / 0.616 | 0.4 | **0.642 / 0.632** |
+| Semántico 0.75 | 2406 | 585 | 3 (5, 7, 10) | 0.475 / 0.417 | 0.578 / 0.603 | 0.605 / 0.630 | 0.3 | 0.583 / **0.647** |
+
+En el barrido de λ se ven tres cosas:
+
+- Entre λ = 0 y el mejor λ el Recall@5 apenas cambia (0.642 en recursivo, 0.578–0.583 en
+  semántico), pero el MRR sube de 0.568 a 0.632 en recursivo (λ = 0.4) y de 0.603 a 0.647 en
+  semántico (λ = 0.3). Es decir, añadir un poco de BM25 no mete chunks relevantes nuevos en el
+  top 5, sino que sube de posición los que el denso ya encontraba.
+- A partir de λ = 0.6 las dos métricas caen rápido (en recursivo, el MRR baja a 0.502 con
+  λ = 0.6): el ranking pasa a estar dominado por BM25.
+- BM25 solo (λ = 1) es la peor configuración en los dos chunkings: coincide con la columna de
+  BM25 de la segunda tabla.
+
+Las preguntas sin resolver no se pueden puntuar porque ningún chunk contiene entero ninguno de
+sus fragmentos de evidencia. La salida de `rag/evaluate.py` las lista con la longitud de cada
+fragmento:
+
+| Chunking | Pregunta | Fragmentos de evidencia (caracteres) |
+|---|---|---|
+| Recursivo | 14 (tendinitis con levofloxacino) | 685 |
+| Recursivo | 44 (sobredosis de morfina) | 683 y 161 |
+| Semántico | 5 (contenido del vial de ceftriaxona) | 421 |
+| Semántico | 7 (reconstitución de la amoxicilina) | 389 |
+| Semántico | 10 (envases de enoxaparina) | 707 y 276 |
+
+Todos los fragmentos caben en el tamaño máximo de su chunking (800 y 1500 caracteres), así que
+no quedan sin resolver por ser largos: un corte cae en mitad de la evidencia y la reparte entre
+dos chunks. En recursivo es el divisor, que corta donde se le acaba el espacio. En semántico es
+un corte semántico o por tamaño.
+
+**Qué concluimos.** El denso gana a BM25 con diferencia. Creemos que se debe a las preguntas
+coloquiales e inversas (de síntoma a fármaco) del gold (ver la entrada del conjunto dorado), que
+no comparten palabras con la ficha. BM25 sirve como complemento con un
+peso pequeño: nuestra hipótesis es que sube el chunk bueno por coincidencia exacta con el nombre
+del fármaco o con cifras, en fichas de la misma familia que el denso confunde (cefalosporinas,
+carbapenems) aunque no lo hemos verificado pregunta a pregunta. Los dos chunkings quedan prácticamente
+empatados en MRR. Sin embargo, el recursivo tiene mejor recall y una pregunta menos sin resolver, así que
+**`/rag` usa chunking recursivo e híbrido con λ = 0.4**. Elegimos λ por MRR porque el endpoint
+devuelve pocos fragmentos y lo que importa es que el bueno salga primero. El análisis de las preguntas que
+fallan, por categoría del gold, está en la entrada siguiente. La comparación de instrucciones
+de embedding está en la entrada del 2026-11-01 (Instrucción de la consulta en los embeddings).
+
+---
+
+### 2026-10-30 · Fase 3 · Preguntas que fallan, por categoría del gold
+
+**Qué queríamos saber.** En qué tipos de pregunta falla la recuperación y si se cumple la
+hipótesis de la entrada anterior (que el denso gana por las preguntas coloquiales e inversas).
+
+**Qué hicimos.** Añadimos a `rag/evaluate.py` las métricas por categoría del gold y la lista de
+preguntas que fallan con el híbrido (con la ficha de la evidencia y la de cada fragmento
+recuperado). Las categorías se asignan por el número de pregunta, en el orden del gold. Mismo
+comando que en la entrada anterior.
+
+**Qué pasó.** Híbrido con chunking recursivo y λ = 0.4 (Recall@5 / MRR y número de fallos):
+
+| Categoría | Preguntas | Recall@5 / MRR | Fallos |
+|---|---|---|---|
+| Un medicamento, una sección | 15 | 0.571 / 0.524 | 6 |
+| Un medicamento, varias secciones | 8 | 0.521 / 0.812 | 1 |
+| Varios medicamentos | 8 | 0.583 / 0.463 | 2 |
+| Inversas | 8 | 1.000 / 1.000 | 0 |
+| Lenguaje coloquial | 5 | 0.250 / 0.250 | 3 |
+| Premisa dudosa | 3 | 0.667 / 0.700 | 1 |
+| Cálculo | 3 | 1.000 / 0.567 | 0 |
+
+En los 13 fallos, la ficha correcta está entre los cinco fragmentos recuperados: lo que falla
+es la sección, no el fármaco.
+
+**Qué concluimos.** Las inversas, que nos preocupaban, salen perfectas. Las peores son las
+coloquiales: "¿cuánto me dura la vancomicina ya preparada?" lleva a la ficha de la vancomicina,
+pero no a la sección de periodo de validez. La hipótesis se cumple solo en parte, porque en
+recursivo el denso gana a BM25 en todas las categorías, no solo en esas dos. También vimos que
+las preguntas 6 y 41 tienen evidencias tan genéricas que aparecen en varias fichas (3 y 7), y
+habría que alargarlas. Con tan pocas preguntas por categoría, estos resultados son orientativos.
+
+---
+
+### 2026-10-29 · Fase 3 · Generación con citas: primera prueba de `/rag`
+
+**Qué queríamos saber.** Si `POST /rag` funciona de principio a fin con nuestro modelo de
+razonamiento de la fase 1 como generador: si recupera, si cita fragmentos que existen y si dice
+que no sabe cuando el corpus no tiene la respuesta.
+
+**Qué hicimos.** `rag/generate.py` es lo que hay detrás de `POST /rag`. Al arrancar lee el corpus,
+lo trocea con chunking recursivo, construye los tres retrievers (híbrido con λ = 0.4, según el
+barrido de la entrada anterior) y carga el generador. El índice denso se guarda en `rag/index/`
+para no reembeber el corpus en cada arranque. Para cada pregunta recupera los `top_k` mejores
+fragmentos y los mete en el prompt aumentado con su identificador. Después genera la respuesta y
+extrae las citas, quedándose solo con las que existen entre los fragmentos devueltos.
+
+El generador se toma de las mismas variables que `/reasoning`, `ARCA_RLM_BASE_MODEL` y
+`ARCA_RLM_ADAPTER` del `.env`: nuestro modelo de la fase 1, Qwen3-0.6B con el adaptador LoRA
+`rlm/weights/final_rlm_lora_sin_kl`. Como se entrenó con el prompt de sistema de R1-Zero, el
+prompt aumentado se mete en ese prompt de sistema; el modelo razona en `<think>` y la respuesta
+es el bloque `<answer>`, igual que en `/reasoning`. La decodificación es voraz.
+
+Levantamos la API desde la raíz del repositorio y comprobamos que la fase `rag` aparece como
+`ready`:
+
+```bash
+uv run uvicorn api.app:app --port 8001
+curl localhost:8001/health
+```
+
+Hicimos tres peticiones, una con cada retriever. Las peticiones 
+aparecen con curl pero también las hicimos exponiendo la api con ngrok usando Postman 
+confirmando que funciona.
+
+**Qué pasó.**
+
+**Caso 1.** Una pregunta del gold, con el híbrido:
+
+```bash
+curl -s -X POST localhost:8001/rag -H 'Content-Type: application/json' \
+  -d '{"question": "¿Cómo debe ajustarse la dosis de cefotaxima en pacientes con insuficiencia renal grave?", "top_k": 5, "retriever": "hybrid"}'
+```
+
+Fragmentos recuperados: ceftriaxona 4.2 (0.91), cefotaxima 4.4 (0.84, `7f4d67e570-0026`),
+ceftazidima 4.2 (0.49, `910ed8f16d-0011`), cefuroxima 4.2.1 (0.45) y cefazolina 4.2 (0.44).
+Citas: ninguna. Respuesta:
+
+> La dosis de cefotaxima debe ajustarse según el cálculo del aclaramiento de creatinina, que se
+> basa en el valor de la creatinina sérica. La dosis de carga inicial es de 1 g y las dosis de
+> mantenimiento se basan en el aclaramiento de creatinina. La vigilancia clínica de la seguridad
+> y la eficacia debe incluir la monitorización de la función renal.
+
+El único fragmento de cefotaxima es el de la sección 4.4, no el de la 4.2 que tiene la respuesta
+(`7f4d67e570-0011`), así que no da la regla concreta de la ficha (reducir a la mitad la dosis de
+mantenimiento si el aclaramiento es < 10 ml/min). Además, "la dosis de carga inicial es de 1 g"
+es la dosis de la **ceftazidima** (`910ed8f16d-0011`), atribuida a la cefotaxima.
+
+**Caso 2.** Una pregunta coloquial, con el denso:
+
+```bash
+curl -s -X POST localhost:8001/rag -H 'Content-Type: application/json' \
+  -d '{"question": "¿Se puede dar meropenem con probenecid?", "top_k": 5, "retriever": "dense"}'
+```
+
+Fragmentos recuperados: meropenem 4.5 (0.86, `de9b07db3c-0021`), meropenem 4.4 (0.76),
+amoxicilina 4.5 (0.71), meropenem 4.4 (0.68) y meropenem 4.4 (0.68). Citas: ninguna. Respuesta:
+
+> Se puede administrar meropenem con probenecid, pero se debe considerar la inhibición de la 
+> excreción renal de meropenem por probenecid. La combinación puede afectar la dosis y la 
+> eficacia, por lo que se recomienda consultar a un médico antes de administrar ambas medicamentos.
+
+El primer fragmento tiene la respuesta: el probenecid inhibe la excreción renal del meropenem y
+"se requiere precaución". El modelo recoge la interacción, pero la conclusión ("ajustar la dosis
+de probenecid") no está en ningún fragmento.
+
+**Caso 3.** Una pregunta que el corpus no puede responder (el omeprazol no está en el corpus),
+con BM25:
+
+```bash
+curl -s -X POST localhost:8001/rag -H 'Content-Type: application/json' \
+  -d '{"question": "¿Cuál es la dosis de omeprazol intravenoso en una hemorragia digestiva?", "top_k": 5, "retriever": "bm25"}'
+```
+
+Fragmentos recuperados: enoxaparina 4.4 (17.9), heparina 4.9 (17.0), furosemida 4.2 (16.9),
+furosemida 4.2 (16.3) y azitromicina 4.2.2 (15.9). Citas: ninguna. Respuesta:
+
+> La información proporcionada no incluye datos sobre la dosis de omeprazol intravenosa en casos
+> de hemorragia digestiva. No hay referencias o datos sobre este medicamento en la información disponible.
+
+BM25 empareja palabras como "dosis", "intravenoso" o "hemorragia" y trae fragmentos sin relación,
+pero el modelo reconoce que no tiene la información. Es el comportamiento esperado.
+
+**Qué concluimos.** La API funciona con los tres retrievers, y la recuperación y el prompt
+aumentado son los esperados. Con nuestro modelo como generador, en cambio, las respuestas no
+cumplen lo que se pide en `/rag`. No cita ningún fragmento, aunque el prompt lo pide. Mezcla
+datos de fármacos distintos (la dosis de la ceftazidima) y añade conclusiones que no están en
+los fragmentos (ajustar la dosis de probenecid). Lo único que hace bien es reconocer que el
+omeprazol no está. Creemos que se debe al modelo y no al pipeline. El adaptador se entrenó para
+calcular dosis a partir de un enunciado corto y responder con un número en `<answer>`, no para
+leer varios fragmentos largos y citar su origen, y un modelo de 0.6B tiene poca capacidad para
+separar cinco fichas parecidas en el mismo contexto. Habría que entrenar al modelo para que 
+aprendiera a citar.
+
+---
+
+### 2026-11-01 · Fase 3 · ¿Sabe citar el generador? Comparación de cuatro modelos
+
+**Qué queríamos saber.** En la primera prueba de `/rag` nuestro modelo (Qwen3-0.6B con el adaptador
+de la fase 1) no citaba ningún fragmento. Queremos saber si es culpa del entrenamiento (SFT y GRPO
+nos habrían quitado la capacidad de citar) o del tamaño: ¿cita el 0.6B base sin adaptador?, ¿y
+uno mayor? Si el base cita y el nuestro no, hay que arreglar el entrenamiento; si no cita ni el
+base, habría que enseñarle a citar o cambiar de modelo.
+
+**Qué hicimos.** Misma recuperación y mismo prompt para los cuatro: chunking recursivo, híbrido
+con λ = 0.4, `top_k = 5`. Solo cambia el generador, que se elige con las variables de `/rag`.
+`rag/compare_generators.py` genera la respuesta de cada pregunta del gold que tiene fragmento
+relevante (48 de 50; dos no se resuelven con el chunking recursivo) y de 8 preguntas que el
+corpus no puede responder (omeprazol, metformina, atorvastatina, warfarina, diazepam rectal,
+precio de la vancomicina, descubridor de la penicilina, insulina glargina). Decodificación
+greedy, 1024 tokens máximo; los modelos base van sin razonamiento (`enable_thinking=False`) y el
+adaptador con el prompt de sistema R1-Zero de la fase 1.
+
+```bash
+ARCA_RLM_BASE_MODEL=Qwen/Qwen3-0.6B uv run python -m rag.compare_generators --tag qwen3-0.6b-base
+ARCA_RLM_BASE_MODEL=Qwen/Qwen3-0.6B ARCA_RLM_ADAPTER=rlm/weights/final_rlm_lora_sin_kl \
+  uv run python -m rag.compare_generators --tag qwen3-0.6b-rlm
+ARCA_RLM_BASE_MODEL=Qwen/Qwen3-1.7B uv run python -m rag.compare_generators --tag qwen3-1.7b
+ARCA_RLM_BASE_MODEL=Qwen/Qwen3-4B   uv run python -m rag.compare_generators --tag qwen3-4b
+```
+
+Las respuestas completas están en `reports/rag/generators/<tag>.json`. El script no carga el
+`.env`, así que el adaptador solo se aplica donde se indica (el campo `model` de cada JSON lo
+confirma). Una respuesta "cita" si contiene algún id entre corchetes que existe entre los cinco
+fragmentos devueltos. El reparto de las respuestas sin cita usa un detector de abstención por
+expresiones regulares, que es orientativo.
+
+**Qué pasó.** En 35 de las 48 preguntas el fragmento correcto estaba entre los cinco recuperados,
+igual para los cuatro modelos.
+
+| Modelo | Cita algo | Cita el fragmento correcto | Sin cita: abstención | Sin cita: fragmento correcto no recuperado | Sin cita: fragmento correcto recuperado | Ids inventados | Preguntas sin respuesta que citan |
+|---|---|---|---|---|---|---|---|
+| Qwen3-0.6B base | 17/48 (35 %) | 14 | 12 | 4 | 15 | 0 | 0/8 |
+| Qwen3-0.6B + adaptador (el nuestro), 1024 tokens | 6/48 (12,5 %) | 5 | 9 | 6 | 18 | 0 | 0/6 |
+| Qwen3-0.6B + adaptador (el nuestro), 1536 tokens | 5/48 (10,4 %) | 3 | 8 | 8 | 22 | 0 | 0/8 |
+| Qwen3-1.7B base | 38/48 (79 %) | 26 | 6 | 1 | 3 | 0 | 3/8 |
+| Qwen3-4B base | 45/48 (94 %) | 33 | 3 | 0 | 0 | 0 | 2/8 |
+
+*Fila del adaptador corregida (ver la entrada "Las citas eran ids del razonamiento"): 9 de las 48
+respuestas con fragmento y 2 de las 8 sin respuesta se truncaron dentro del razonamiento (1024
+tokens) y no cuentan como respuesta, por eso las 33 sin cita no suman 42 y las preguntas sin
+respuesta son 6. Antes de corregirlo la tabla decía 14/48 (29 %), 10, 9, 6, 19 y 1/8.*
+
+Cuando el fragmento correcto está entre los recuperados, el modelo lo cita en 14 de 35 casos
+(0.6B base), 5 y 3 (0.6B con adaptador, con 1024 y 1536 tokens), 26 (1.7B) y 33 (4B).
+
+Lo que se ve al leer las respuestas:
+
+- **0.6B base.** Cita poco y mal. Cuando cita, a veces copia la cabecera del contexto
+  (`[id] (from fichero.md)`) en vez de citar al final de la afirmación. Mezcla fármacos (habla de
+  abrocitinib y fluconazol en una pregunta de meropenem), inventa cifras (dexketoprofeno a
+  "1,4 microgramos/kg/h") y se abstiene en inglés.
+- **0.6B con adaptador.** Peor que el base. En 9 de 48 respuestas el razonamiento se corta a los
+  1024 tokens sin llegar a la respuesta, y esas respuestas devolvían el razonamiento como si fuera
+  la respuesta, con sus ids contados como citas (ver la entrada siguiente a esta). Dice que la información no incluye "quién descubrió la penicilina" y a continuación
+  responde "Alexander Fleming en 1928" con conocimiento propio.
+- **1.7B.** Cita en cuatro de cada cinco respuestas. Las sin cita son abstenciones o preguntas donde
+  el fragmento correcto no se recuperó; solo 3 no citan teniendo el fragmento. En atorvastatina y
+  warfarina, que el corpus no responde, cita un fragmento lateral y contesta con conocimiento propio.
+- **4B.** Cita en 45 de 48 y casi siempre el fragmento correcto cuando lo tiene. Las tres sin cita
+  son abstenciones. En 6 de las 8 preguntas sin respuesta no cita nada y dice que la información no
+  está. En warfarina cita fragmentos y explica el INR, y en
+  diazepam rectal dice que no hay dosis pediátrica pero cita un fragmento relacionado.
+
+Ningún modelo inventa ids. La comprobación de que los ids existen siempre se cumple, pero
+**no garantiza que la afirmación esté en el fragmento citado**: el 1.7B y el 4B citan en preguntas
+que el corpus no responde y el 0.6B con adaptador responde fuera del corpus. Citar es necesario y
+no basta.
+
+**Qué concluimos.**
+
+1. **El 0.6B base ya citaba poco (35 %), y con el adaptador cita bastante menos (10-12 %).**
+   Nuestra primera lectura, que el SFT y el GRPO no habían empeorado la capacidad de citar, se
+   apoyaba en una cifra inflada: el 29 % incluía ids mencionados mientras razonaba. Con la cifra
+   corregida el adaptador queda por debajo del base, y la caída no se explica solo porque el
+   razonamiento se trunque: con 1536 tokens terminan 43 de 48 respuestas y solo 5 citan (12 %)
+   frente al 35 % del base (ver la entrada siguiente). Es una diferencia sobre 48 preguntas y
+   una ejecución, así que la damos como indicio y no como medida.
+2. **El factor determinante es el tamaño.** Con el mismo prompt, citar pasa de 35 % (0.6B) a 79 %
+   (1.7B) y 94 % (4B). El 0.6B no es capaz de seguir "cita los pasajes que uses" aunque el
+   fragmento esté delante (15 casos sin cita con el fragmento recuperado), mientras que el 4B
+   falla en 0.
+3. **Hay que cambiar el generador de `/rag`, no entrenar al 0.6B.** Qwen3-4B es el que cumple lo
+   que pide el README: cita, las citas existen y casi siempre apoyan la respuesta. Por lo tanto, para que el modelo cite correctamente deberíamos hacer SFT sobre un modelo que ya sepa citar, uno más grande que el de 0.6B. Para ello, habría que volver a hacer la fase 1 con un modelo más grande como el 4B. Para cambiarlo en las pruebas solo hay que poner
+   `ARCA_RLM_BASE_MODEL=Qwen/Qwen3-4B` y dejar `ARCA_RLM_ADAPTER` vacío.
+4. **Parte de las respuestas sin cita no son culpa del generador.** Con los modelos grandes lo que
+   queda sin citar es sobre todo abstención o fragmento no recuperado. Los fallos de recuperación
+   se concentran en conservación, periodo de validez y envases, donde el texto del fragmento no
+   contiene el nombre del fármaco (`6.3 Periodo de validez | Antes de la apertura: 3 años…` es
+   casi igual en las 47 fichas). Habría que ver si poniendo el
+   nombre del fármaco en la cabecera del chunk, reembebiendo y repitiendo `rag.evaluate` los resultados mejoran.
+
+---
+
+### 2026-11-01 · Fase 3 · Instrucción de la consulta en los embeddings
+
+**Qué queríamos saber.** Qwen3-Embedding se entrena con una instrucción de tarea delante de la
+consulta (`Instruct: ...\nQuery: ...`) y los pasajes se embeben sin ella. Hasta ahora usábamos la
+instrucción por defecto de `rag/embed.py`. Queremos saber cuánto cambia la recuperación si la
+cambiamos, si una instrucción adaptada a nuestro dominio (fichas técnicas, enfermería) la mejora
+y qué pasa sin instrucción o con una que no tiene que ver con la tarea.
+
+**Qué hicimos.** `instruction_sweep` en `rag/evaluate.py`. Los vectores de los pasajes no dependen
+de la instrucción, así que se carga el índice denso persistido y solo cambia `query_instruction`
+(sin reembeber el corpus). Chunking recursivo, λ = 0.4 para el híbrido, k = 5 y las 48 preguntas
+del gold con fragmento resuelto. Se compararon seis instrucciones (`QUERY_INSTRUCTIONS`):
+`default`; `none` (la consulta sin el prefijo `Instruct:`); `domain_en` y `domain_es`
+(fragmento de la ficha técnica que responde a una pregunta de enfermería, en inglés y en español);
+`drug_first` (identificar primero el fármaco y recuperar la sección de su ficha) y `unrelated`
+("Classify the sentiment of the following text."), un control que no tiene que ver con recuperar.
+
+```bash
+uv run python -m rag.evaluate --gold rag/gold/gold.jsonl --k 5 --lam 0.4 --instruction-sweep
+```
+
+Resultados completos en `reports/phase3_instruction_sweep.json`. "Gana/pierde" son los números de
+pregunta (desde 1) que el denso acierta/falla respecto a `default`.
+
+**Qué pasó.**
+
+| Instrucción | Denso Recall@5 | Denso MRR | Fallos (denso) | Híbrido Recall@5 | Híbrido MRR | Gana | Pierde |
+|---|---|---|---|---|---|---|---|
+| default | 0.642 | 0.568 | 13 | 0.642 | 0.632 | | |
+| none | 0.653 | 0.605 | 12 | 0.663 | 0.652 | 3, 30 | 46 |
+| domain_en | 0.580 | 0.523 | 16 | 0.611 | 0.593 | 30 | 24, 31, 46, 49 |
+| domain_es | 0.590 | 0.553 | 16 | 0.622 | 0.622 | 30 | 21, 31, 46, 49 |
+| drug_first | 0.569 | 0.551 | 17 | 0.622 | 0.601 | | 24, 31, 46, 49 |
+| unrelated | 0.000 | 0.000 | 48 | 0.000 | 0.000 | | 35 preguntas |
+
+- **Quitar la instrucción cambia poco.** `default` y `none` quedan dentro de un punto de Recall@5
+  (0.642 y 0.653 en denso): una pregunta de diferencia sobre 48.
+- **Las instrucciones de dominio empeoran, no mejoran.** `domain_en`, `domain_es` y `drug_first`
+  bajan el denso 5-7 puntos (de 13 a 16-17 fallos) y las tres pierden las preguntas 31, 46 y 49
+  (más la 24, o la 21 en `domain_es`); en el híbrido bajan 2-3 puntos. Esperábamos lo contrario.
+- **El control hunde la recuperación.** Con la instrucción de sentimiento, los fragmentos mejor
+  puntuados de una consulta tienen todos la misma similitud (0.547 en el caso que miramos), es
+  decir, el vector de la consulta deja de depender de la pregunta y el ranking es casi constante.
+  El híbrido también cae a 0. Creemos que es porque, con las puntuaciones del denso empatadas, el
+  reescalado a [0, 1] da 1 a los 20 fragmentos del denso y BM25 no consigue sacar a ninguno de los
+  suyos por encima; no lo hemos comprobado.
+
+**Qué concluimos.**
+
+1. **La instrucción importa, pero quitarla apenas cambia el resultado.** La diferencia entre
+   `default` y `none` es de una pregunta y no la interpretamos con 48 preguntas y una sola
+   ejecución. Lo que sí es claro es el efecto del control, que confirma que la instrucción
+   participa de verdad en el vector de la consulta.
+2. **Nuestra hipótesis de que una instrucción de dominio ayudaría no se cumple.** Las tres que
+   mencionan fichas técnicas o el fármaco pierden las preguntas 31, 46 y 49. La 31 (y la 24 y la
+   21 en alguna de ellas) son de "varios medicamentos", con dos fármacos en la consulta; la 46 es
+   de premisa dudosa (amikacina y embarazo) y la 49 de cálculo. Nuestra explicación tentativa es que una instrucción que pide "el fragmento de
+   la ficha" o "identificar el fármaco" empuja la consulta hacia un solo fármaco o hacia el estilo de
+   ficha y se pierde el segundo. No lo hemos comprobado mirando los fragmentos recuperados.
+3. **No cambiamos la instrucción de `/rag`.** `none` sale unas décimas por encima, pero la mejora
+   no se distingue de una pregunta más. Dejamos la de por defecto, la que viene en `rag/embed.py`.
+
+---
+
+### 2026-11-02 · Fase 3 · Las citas del RLM eran ids que mencionaba mientras razonaba
+
+**Qué queríamos saber.** La tabla de la entrada anterior daba al RLM un 29 % de respuestas con
+cita, pero al leer sus respuestas varias empezaban por `<think> Vale, voy a resolverlo paso a
+paso…`. Queríamos saber de dónde salían esas citas y si eran citas de la respuesta o no.
+
+**Qué vimos.** Las respuestas del RLM con `<think>` en el texto son 11 de las 56 generadas (9 de
+las 48 con fragmento y 2 de las 8 sin respuesta). Todas miden entre 1021 y 1024 tokens, mientras que
+el resto no pasa de 328. `MAX_NEW_TOKENS` era 1024: el modelo se quedaba sin tokens **antes de cerrar
+el razonamiento**, sin `</think>` ni `<answer>`. Entonces `split_thinking` (`rlm/inference.py`) no
+encuentra un bloque de razonamiento completo y, por diseño, devuelve todo el texto como respuesta. El
+razonamiento truncado acababa siendo la respuesta de `/rag`, y `extract_citations` contaba como
+citas los ids que el modelo mencionaba al razonar ("…el parágrafo [dd4c9e923a-0010], que dice…"). De
+esas 11, 9 tenían citas. No era un fallo de `split_thinking`: es un caso que el código no
+distinguía de una respuesta normal.
+
+Una cita tiene que salir de la respuesta, no del razonamiento. Con las respuestas truncadas tratadas
+como "sin respuesta", el RLM cita en 6 de 48 preguntas (12,5 %) y no en 14 (29 %), y cita el
+fragmento correcto en 5 y no en 10. Lo recalculamos sobre las respuestas ya guardadas, sin generar de
+nuevo, y corregimos la fila del RLM en la entrada anterior.
+
+**Qué hicimos.** Cuatro cambios, los tres primeros en `rag/generate.py`:
+
+1. `final_answer(raw)`: si la generación tiene `<think>` pero no `</think>`, se cortó razonando y no
+   hay respuesta; devuelve `TRUNCATED_ANSWER` ("No se pudo completar la respuesta: el razonamiento
+   del modelo se truncó.") en vez de una cadena vacía, para que se vea que falló. En el resto de
+   casos usa `split_thinking` como antes. Solo se aplica con adaptador.
+2. `MAX_NEW_TOKENS` de 1024 a 1536 (un 50 % más), para que al RLM le dé tiempo a cerrar el
+   razonamiento.
+3. `check_citations(answer, valid_ids)` separa los ids entre corchetes en válidos e inválidos
+   (los que no están entre los fragmentos devueltos, ya sean ids inventados u otro texto entre
+   corchetes como `[1]`). `extract_citations` pasa a usarla, con la misma firma y resultado.
+4. `RagResponse` en `api/schemas.py` gana el campo opcional `invalid_citations: list[str]`
+   (vacío por defecto, no cambia lo que la API devolvía) y `to_response` lo rellena, además de
+   escribir un aviso en el log cuando hay inválidos. Hasta ahora un id inventado se descartaba sin
+   dejar rastro.
+
+**Qué pasó con 1536 tokens.** Repetimos solo el RLM con el cambio
+(`reports/rag/generators/qwen3-0.6b-rlm-1536.json`):
+
+| RLM | Truncadas | Cita algo | Cita el fragmento correcto | Sin cita entre las que terminan |
+|---|---|---|---|---|
+| 1024 tokens (recalculado) | 9 de 48 (y 2 de 8 sin respuesta) | 6/48 (12,5 %) | 5 | 33 de 39 |
+| 1536 tokens | 5 de 48 (y 0 de 8 sin respuesta) | 5/48 (10,4 %) | 3 | 38 de 43 |
+
+Seis de las nueve respuestas truncadas con 1024 tokens terminan ahora (tres de ellas citan), pero
+dos de las que terminaban pasan a truncarse, de ahí 9 → 5. Y el total de citas, que parece estable
+(6 frente a 5), esconde mucho cambio: de las 6 preguntas que citaban con 1024 tokens, solo 2
+vuelven a citar. De las 39 respuestas que ya terminaban con 1024 tokens, 33 tienen un texto
+distinto al repetir, aunque la decodificación sea greedy (6 salen idénticas). La generación del RLM
+no es reproducible entre ejecuciones, algo que ya vimos al llamar dos veces a la API con la misma
+pregunta, y no hemos investigado la causa. Ya no queda ningún `<think>` suelto en las respuestas.
+Los ids inventados siguen siendo 0 y ninguna de las 8 preguntas sin respuesta cita.
+
+Comprobamos que la API sigue funcionando: los tests pasan, los tres retrievers de
+`POST /rag` responden con el campo nuevo y un retriever inválido sigue dando 422. Los resultados de
+recuperación no cambian (`reports/phase3_eval.json`, el barrido del umbral y el de instrucciones
+salen idénticos) y los tres modelos sin adaptador no se ven afectados: sus respuestas más largas son
+de 296, 686 y 750 tokens, por debajo del límite antiguo.
+
+**Qué concluimos.**
+
+1. **La cifra de citas del RLM estaba inflada.** Más de la mitad de las citas que contaba (8 de las 14
+   respuestas con cita eran de respuestas truncadas) venían del razonamiento. Con el límite de 1024
+   tokens el RLM cita en el 12,5 % de las preguntas, frente al 35 % del 0.6B base.
+2. **Cambia una conclusión de la entrada anterior.** Allí decíamos que el SFT y el GRPO no nos habían
+   quitado la capacidad de citar. Con la cifra corregida el adaptador cita menos que el base, y la
+   ejecución con 1536 tokens indica que no es solo el truncamiento: con casi todas las respuestas
+   terminadas (43 de 48) cita el 12 %, frente al 35 % del base. Lo más probable es que el adaptador,
+   entrenado para devolver un número en `<answer>`, haya perdido parte de la tendencia a citar; no
+   lo hemos aislado (haría falta el mismo prompt con el adaptador desactivado y la misma plantilla
+   de razonamiento, y más preguntas).
+3. **Un id entre corchetes no es una cita.** La comprobación automática que ya había (el id existe
+   entre los fragmentos devueltos) no distingue dónde lo escribió el modelo. Ahora solo se mira el
+   texto de la respuesta, pero seguimos sin comprobar que la afirmación esté en el fragmento
+   citado; para eso haría falta un modelo juez.
+
+**Limitaciones.** Como la generación no es reproducible, las cifras de citas de cualquiera de los
+cuatro modelos (no solo el RLM) llevan un ruido que no hemos medido; no hemos repetido ninguna
+ejecución varias veces. El recálculo con 1024 tokens usa las respuestas ya guardadas y trata las truncadas
+como "sin respuesta", sin volver a generar. El detector de abstención sigue siendo una expresión
+regular. 48 preguntas y una sola ejecución.
+
+---
