@@ -1590,7 +1590,7 @@ Levantamos la API desde la raíz del repositorio y comprobamos que la fase `rag`
 `ready`:
 
 ```bash
-uv run uvicorn api.app:app --port 8001   # o make api, que usa el puerto 8000
+uv run uvicorn api.app:app --port 8001
 curl localhost:8001/health
 ```
 
@@ -1624,7 +1624,7 @@ es la dosis de la **ceftazidima** (`910ed8f16d-0011`), atribuida a la cefotaxima
 **Caso 2.** Una pregunta coloquial, con el denso:
 
 ```bash
-curl -s -X POST localhost:8000/rag -H 'Content-Type: application/json' \
+curl -s -X POST localhost:8001/rag -H 'Content-Type: application/json' \
   -d '{"question": "¿Se puede dar meropenem con probenecid?", "top_k": 5, "retriever": "dense"}'
 ```
 
@@ -1643,7 +1643,7 @@ de probenecid") no está en ningún fragmento.
 con BM25:
 
 ```bash
-curl -s -X POST localhost:8000/rag -H 'Content-Type: application/json' \
+curl -s -X POST localhost:8001/rag -H 'Content-Type: application/json' \
   -d '{"question": "¿Cuál es la dosis de omeprazol intravenoso en una hemorragia digestiva?", "top_k": 5, "retriever": "bm25"}'
 ```
 
