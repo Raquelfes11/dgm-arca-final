@@ -1915,3 +1915,329 @@ como "sin respuesta", sin volver a generar. El detector de abstención sigue sie
 regular. 48 preguntas y una sola ejecución.
 
 ---
+
+### 2026-11-03 · Fase 4 · Timeout por herramienta del agente
+
+**Qué queríamos saber.** El README de la fase 4 pide un "límite de tiempo por herramienta" en el
+bucle ReAct. Lo implementamos primero con 60 s, una estimación sin datos. Queríamos un valor
+elegido con lo que tardan de verdad las herramientas del agente.
+
+**Qué hicimos.** `uv run python -m agent.measure_latency` (escribe `reports/agent_tool_latency.json`).
+Llama a `registry.call` directamente, sin el tope del agente, para que las llamadas lentas no se
+corten. Mide segundos de reloj:
+
+- `dose_calculator` y `convert_units`: 200 llamadas cada una.
+- `search_medication_cima`: 18 llamadas reales a la API de CIMA, con 17 principios activos
+  distintos y uno que no existe (`zorbaxil`, que devuelve error rápido).
+- `search_knowledge_base` en caliente (retriever ya construido): una llamada por pregunta del
+  gold, 50 en total, `top_k = 5`, retriever híbrido con λ = 0.4 y chunking recursivo.
+- `search_knowledge_base` en frío: la primera llamada de un proceso nuevo, que construye el
+  retriever (carga el modelo de embeddings y el índice denso guardado en `rag/index/recursive`).
+  3 procesos distintos.
+- `search_knowledge_base` en frío y sin índice guardado: lo mismo con una carpeta temporal, de modo
+  que hay que calcular los embeddings de todo el corpus. 1 proceso; el índice real no se toca.
+
+**Qué pasó.**
+
+| Herramienta | n | Mediana | p95 | Máximo |
+|---|---|---|---|---|
+| `dose_calculator` | 200 | 0.03 ms | 0.04 ms | 3 ms |
+| `convert_units` | 200 | 0.10 ms | 0.12 ms | 268 ms |
+| `search_medication_cima` | 18 | 0.40 s | 1.10 s | 1.10 s |
+| `search_knowledge_base` (en caliente) | 50 | 0.29 s | 0.78 s | 0.80 s |
+| `search_knowledge_base` (en frío, con índice) | 3 | 11.9 s | 11.9 s | 11.9 s |
+| `search_knowledge_base` (en frío, sin índice) | 1 | 104 s | 104 s | 104 s |
+
+Las herramientas locales son prácticamente instantáneas (el máximo de `convert_units` es,
+probablemente, la primera llamada, que construye el registro de unidades de `pint`). CIMA es una
+llamada de red: la mediana es 0.4 s y la peor fue 1.1 s; además `search_medication_cima` ya se rinde
+sola a los 15 s (`timeout=15` en `tool_use/tools.py`). La búsqueda en caliente no pasa de 0.8 s. Lo
+lento es construir el retriever la primera vez: 11.7 a 11.9 s en las tres repeticiones con el índice
+ya guardado, y 104 s cuando hay que calcular los embeddings del corpus (83 lotes).
+
+Con el valor anterior, 60 s, la prueba en frío y sin índice se cortó antes de terminar. Además, el
+hilo abandonado seguía usando la GPU cuando terminó el programa y el proceso abortó con `terminate
+called without an active exception`: un hilo de Python no se puede matar, solo abandonarlo.
+
+**Qué concluimos.** `TOOL_TIMEOUT_S = 30` s, igual para todas las herramientas. Es unas 27 veces la
+peor llamada normal (1.1 s), unas 2.5 veces la primera búsqueda con el índice guardado (11.9 s) y el
+doble del límite propio de CIMA (15 s), así que ninguna llamada sana debería cortarse y una colgada
+se detecta en medio minuto. Con 30 s, una tarea de `max_steps` pasos pierde como mucho
+`30 · max_steps` s por culpa de herramientas colgadas. Un único valor sirve porque ninguna
+herramienta normal necesita más de 12 s; si añadimos una que tarde más, tendría que llevar el suyo.
+
+Lo que 30 s **no** cubre es construir el índice desde cero (104 s). Es un evento de despliegue, no de
+funcionamiento normal: `/rag` y el agente comparten `rag/index/recursive`, así que basta con que
+exista (lo crea la primera llamada a `/rag` o al retriever). Si no existe, la primera búsqueda del
+agente agota el tiempo, el modelo recibe el error y el retriever termina de construirse en segundo
+plano, de modo que la llamada siguiente ya funciona. Si queremos evitarlo, lo razonable es construir
+el retriever en `ReActAgent.load()`, pero lo dejamos sin hacer: encarece el arranque de la API.
+
+Hay que leer estos números con cautela: mientras corría la medición se estaba ejecutando en paralelo otra prueba del
+agente en la misma GPU, así que los tiempos que dependen de ella (búsqueda en caliente, en frío y
+sin índice) pueden estar algo inflados. La repetición en frío, que dio 11.7 a 11.9 s, sugiere que el
+efecto fue pequeño, pero el caso sin índice es una sola ejecución y su 104 s es una cota alta, no una
+medida limpia. Los 18 tiempos de CIMA son de un solo momento y dependen de la red. El timeout abandona 
+el hilo, no lo detiene: una herramienta colgada sigue consumiendo recursos hasta que termina por su cuenta. 
+Mide la herramienta aislada; no incluye la generación del modelo, que es lo que más tarda en cada paso del agente.
+
+---
+
+### 2026-11-03 · Fase 4 · Evitar el bucle de llamadas idénticas
+
+**Qué queríamos saber.** El README de la fase 4 pide guardarraíles contra bucles ("la misma llamada
+repetida") y el docstring de `ReActAgent.run` pide decidir qué se hace en ese caso. Nos lo
+encontramos en una prueba con el cerebro `thinking` (la pregunta de la cefotaxima en insuficiencia
+renal): en el paso 2 el modelo repitió exactamente la llamada del paso 1,
+`search_medication_cima(active_ingredient="cefotaxima", max_results=5)`, y no avanzó.
+
+**Qué hicimos.** En `agent/react_agent.py`, cada ejecución de `run` cuenta cuántas veces se ha hecho
+cada llamada. La clave es el nombre de la herramienta más sus argumentos con las claves ordenadas
+(`json.dumps(..., sort_keys=True)`), así que `{"a": 1, "b": 2}` y `{"b": 2, "a": 1}` cuentan como la
+misma. El contador es de la ejecución y no pasa de una petición a otra. Con
+`MAX_REPEATED_CALLS = 3`:
+
+- La primera vez se ejecuta sin más.
+- La segunda vez idéntica también se ejecuta, pero se añade a la observación un aviso: ya hiciste
+  esta llamada y el resultado no va a cambiar, prueba otros argumentos u otra herramienta, o llama a
+  `final_answer`.
+- La tercera vez idéntica no se ejecuta. Se añade a la traza un paso con la observación
+  `Loop detected` y la ejecución termina con `succeeded=False` y `final_answer=""`, en lugar de
+  gastar los pasos que queden.
+- `final_answer` no cuenta: la función termina antes de llegar a este código.
+
+Para probarlo sin cargar ningún modelo, `tests/test_react_agent.py` cambia `generate` por una función
+que devuelve respuestas fijadas de antemano (`uv run pytest tests/test_react_agent.py`).
+
+**Qué pasó.** Con esas respuestas fijas: tres llamadas idénticas seguidas, con `max_steps=10`,
+terminan en 3 pasos con `succeeded=False`. El paso 2 lleva el aviso, el paso 3 empieza por
+`Loop detected` y el paso 1 no lleva aviso. Cuatro llamadas a la misma herramienta con argumentos
+distintos no producen ningún aviso y acaban bien. En la ejecución real con `thinking` la repetición
+ocurrió en el paso 2; no comprobamos si la observación llevaba el aviso, y en el paso 3 el modelo
+dio ya su respuesta final, sin haber consultado la base de conocimiento.
+
+**Qué concluimos.** Comprobamos que el mecanismo funciona como lo hemos descrito, pero no que ayude a
+un modelo real. Con un solo caso no podemos atribuir al aviso lo que hizo el modelo en el paso 3.
+Avisar a la segunda y cortar a la tercera es una decisión nuestra y no está medida. Cuando haya banco
+de tareas compararemos, con y sin detección, la tasa de éxito y el número de pasos.
+
+El mecanismo tiene límites. Solo detecta repeticiones exactas: no ve un modelo que alterne A, B, A, B, ni uno
+que cambie un argumento sin importancia (`"cefotaxima"` por `"Cefotaxima"`). El contador suma las
+repeticiones de toda la ejecución, no solo las seguidas. Al cortar se devuelve `final_answer=""`, de
+modo que el usuario no recibe nada aunque el agente ya tuviera información útil; otra opción sería
+obligarle a cerrar con lo que haya reunido. El aviso está en inglés, como el resto del prompt.
+
+---
+
+### 2026-11-03 · Fase 4 · Herramientas que piden confirmación
+
+**Qué queríamos saber.** Algunas herramientas llevan `requires_confirmation=True` porque tienen
+efectos secundarios. En el registro por defecto solo hay una, `create_preparation_sheet`, que escribe
+un PDF en disco. En una llamada a `POST /agent` no hay nadie que pueda confirmar, y el docstring de
+`ReActAgent.run` pide decidir qué hacer en ese caso.
+
+**Qué hicimos.** Las bloqueamos siempre. En `ReActAgent._call_tool`, antes de ejecutar nada, si la
+herramienta tiene `requires_confirmation` no se llama a `registry.call`. Se devuelve un
+`ToolCallRecord` con `ok=False`, `requires_confirmation=True` y un error que el modelo lee como
+observación: la herramienta requiere confirmación del usuario y no puede ejecutarse aquí, que use otra
+o explique en `final_answer` lo que haría. El bucle continúa, así que el modelo puede buscar otra vía
+o cerrar explicándolo. La comprobación mira el atributo de la herramienta, no su nombre, y se hace antes
+de validar los argumentos. Descartamos ejecutarlas sin más (no hay quien confirme) y hacerlo
+configurable (más superficie para equivocarse).
+
+Lo probamos con las respuestas fijadas de antemano de `tests/test_react_agent.py`.
+
+**Qué pasó.** Cuando el modelo pide `create_preparation_sheet`, recibe la observación de bloqueo y no
+se crea ningún archivo en la carpeta de fichas (el test compara su contenido antes y después).
+Después puede terminar con `final_answer` y `succeeded=True`. Llamando directamente a `_call_tool`
+sale `ok=False` con `requires_confirmation=True`. En ninguna de nuestras ejecuciones con modelos
+reales se ha intentado llamar a esa herramienta, así que no sabemos cómo reacciona uno al bloqueo.
+
+**Qué concluimos.** Mientras no haya un canal de confirmación, bloquear es lo más seguro, y el README
+menciona esta cuestión entre los guardarraíles. El coste lo asumimos: el agente no puede completar
+una tarea cuyo resultado sea esa ficha, y como mucho dirá lo que haría. Si el banco incluye alguna que
+la necesite, será una tarea que el agente no puede resolver por diseño y habrá que anotarlo, no
+contarlo como fallo del modelo.
+
+Conviene tener presente que esto es distinto de lo que hace la fase 2: `tool_use/executor.py` permite los
+efectos secundarios por defecto (`ARCA_TOOLS_ALLOW_SIDE_EFFECTS` vale `"1"`) y, cuando los desactiva,
+su mensaje dice "Ask the user to confirm". El agente es más estricto y no tiene ninguna variable para
+relajarlo. El mensaje de bloqueo está en inglés. Y no tenemos medido cuántas veces un modelo pediría
+una herramienta bloqueada.
+
+---
+
+### 2026-11-03 · Fase 4 · Política de memoria del agente
+
+**Qué queríamos saber.** `agent/memory.py` traía hecha la mecánica (guardar mensajes, contar tokens,
+resumir lo viejo cuando se pasa el presupuesto) y dejaba nuestra la política: qué se resume, cuándo y
+qué se conserva siempre. El docstring de `compress` pregunta, además, si las observaciones de las
+herramientas deben recortarse antes de resumir y si el primer mensaje del usuario debe quedarse
+literal. Antes de decidir quisimos saber cuánto ocupa lo que entra en la conversación.
+
+**Qué hicimos.** Primero medimos: `uv run python -m agent.measure_context_size` (escribe
+`reports/agent_context_size.json`) cuenta tokens con el tokenizador de Qwen3-0.6B sobre las 20
+primeras preguntas de `rag/gold/gold.jsonl`. Mide el prompt de sistema con las herramientas
+registradas y `max_steps=10`, y las observaciones de `search_knowledge_base` (retriever híbrido,
+λ = 0.4, chunking recursivo) con `top_k` de 3 y de 5.
+
+Con eso fijamos la política, que está también en el docstring de `ConversationMemory.compress`, y la
+conectamos a `run` con un `summarize` que usa el propio cerebro. Las decisiones y su motivo:
+
+| Decisión | Valor | Motivo |
+|---|---|---|
+| Cuándo comprimir | Solo si se pasa el presupuesto (6000 tokens, sin cambiar) y hay algo más antiguo que lo que se conserva | Es la mecánica dada. Cambiamos cómo se cuenta: antes por simplicidad asumíamos `len(texto) // 4`, ahora el tokenizador del cerebro en uso, porque la aproximación subestima el español |
+| Qué se conserva siempre | La tarea, que nunca se resume (`pin_first`), y los últimos 6 mensajes (`keep_last`, el valor por defecto) | La tarea es lo único que el agente no puede reconstruir si el resumen la deforma. Seis mensajes son los tres últimos pasos (cada paso añade el del modelo y el de la herramienta). No hemos ajustado el 6 |
+| Dónde cortar | Lo que se conserva nunca empieza por un resultado de herramienta; si el corte cae ahí, se retrocede | Un resultado sin la llamada que lo pidió no se entiende. Es una precaución: no hemos comprobado qué hace la plantilla de Qwen con un mensaje `tool` suelto |
+| Qué ve el resumidor | Los mensajes viejos, con cada resultado de herramienta recortado a 1500 caracteres | Los pasajes son lo que más ocupa y lo que menos hace falta literal en un resumen. Solo se recorta lo que se resume: los mensajes vivos no se tocan |
+| Quién resume | El mismo cerebro, con `SUMMARY_PROMPT` y sin bloque de razonamiento | No añade modelos. Un resumen no necesita razonar y gastaría tokens. Si el modelo no devuelve nada utilizable (por ejemplo un `<think>` cortado por el límite de tokens) se usan los primeros 1000 caracteres del historial, para no perderlo todo |
+| Qué se hace con el resumen | Se añade al anterior y va en el mensaje de sistema | Mecánica dada |
+
+Para comprobar la mecánica sin cargar ningún modelo, `tests/test_react_agent.py` cambia `generate`
+por una función que devuelve respuestas fijadas de antemano (`uv run pytest tests/test_react_agent.py`).
+
+Después lo miramos con modelos reales: `uv run python -m agent.check_summary base thinking` resume
+una llamada a `search_knowledge_base` con su resultado real (la pregunta de la cefotaxima, `top_k = 5`)
+con cada cerebro y mide el tiempo, y luego llena una memoria con ese mismo resultado tres veces para
+ver que `compress` se dispara. Ese script crea su propia memoria, con `pin_first=True` puesto a mano:
+comprueba el mecanismo, no que el agente lo active (eso lo comprueba un test de `run`).
+
+**Qué pasó.**
+
+| Qué | Tokens | Caracteres |
+|---|---|---|
+| Prompt de sistema con las herramientas | 1699 | 6380 |
+| Observación de `search_knowledge_base`, `top_k = 5` (mediana, mín.–máx.) | 1097 (851–1361) | 3471 (2825–3978) |
+| Observación de `search_knowledge_base`, `top_k = 3` (mediana, mín.–máx.) | 676 (570–822) | 2140 (1877–2457) |
+| Observación de `search_medication_cima` (cefotaxima, 5 resultados) | 454 | 1084 |
+
+Con el presupuesto de 6000 tokens que traía el proyecto, el prompt más cuatro búsquedas medianas
+suman 1699 + 4 · 1097 = 6087, y eso sin contar lo que escribe el modelo en cada paso, que con
+`thinking` incluye el bloque `<think>`. Lo que llena la memoria son los pasajes recuperados, no los
+mensajes del modelo ni los resultados de las otras herramientas.
+
+En las pruebas con respuestas fijas, la tarea sobrevive a la compresión, el resumidor recibe los
+resultados recortados mientras los mensajes vivos quedan intactos, no queda un resultado suelto al
+principio de lo conservado, y una ejecución con presupuesto pequeño llama al resumidor y termina bien.
+Los dos tests de memoria que venían dados con el proyecto siguen pasando.
+
+Con modelos reales, `compress` se dispara (4255 tokens pasan a 1609 y 7 mensajes a 3; la memoria de
+prueba contiene tres veces el resultado más grande de las 20 preguntas, 1361 tokens y 3978
+caracteres, y con la mediana habría unos 3460 tokens) y la tarea se conserva, pero los resúmenes tienen errores. El de `base` (45 s, 452 caracteres) habla de la dosis
+de **ceftriaxona** como si fuera la respuesta a la pregunta, que era sobre cefotaxima. El de
+`thinking` (132 s, 1633 caracteres) organiza la información por fármaco, pero atribuye a la cefotaxima
+la frase de que solo en insuficiencia renal preterminal se limita a 2 g diarios, que el pasaje
+recuperado dice de la ceftriaxona. Además añade secciones de cefuroxima y cefazolina; no hemos
+comprobado si salen de los pasajes recuperados. Los tiempos son altos para un solo resumen, con el
+modelo ya cargado y la GPU libre de nuestras pruebas, y no los entendemos: una tarea completa de tres
+pasos con `base` tardó 9 s en otra prueba. Puede deberse a que la GPU es compartida, pero no lo hemos
+comprobado.
+
+**Qué concluimos.** La política tiene una justificación, pero ninguna decisión está medida: no sabemos
+si comprimir mejora la tasa de éxito, y los resúmenes que revisamos a mano tienen errores (arriba), así que no podemos dar por buena la compresión sin medirla. La
+compresión no puede dispararse antes del cuarto paso (hacen falta más de 6 mensajes anteriores a los
+conservados, a razón de dos por paso) y, con búsquedas medianas y un presupuesto de 6000, tampoco se pasa
+el presupuesto antes de la cuarta, así que en tareas cortas no se ve. Para evaluarla en el banco habrá que incluir tareas largas o bajar el presupuesto, y
+comparar sin compresión, con compresión, y varios valores de `obs_chars` y `keep_last`.
+
+La política tiene límites. Recortar a 1500 caracteres deja, para el resumidor, un 43 % de una
+observación mediana de `top_k = 5` (unos dos pasajes de cinco). Como el retriever ordena por puntuación
+esto conserva los mejores, pero su Recall@5 es de 0.64 en las medidas de la fase 3 y la evidencia puede
+estar en el tercer pasaje o más abajo, que el resumen no verá. Los resúmenes consumen tokens y tiempo, y
+cuentan en `tokens_used`. El resumen acumulado crece con cada compresión y no tiene tope. Un modelo
+pequeño puede perder cifras al resumir. Y las medidas de tamaño son de 20 preguntas con un solo
+tokenizador.
+
+---
+
+### 2026-11-03 · Fase 4 · Formato de las llamadas: reparar, reintentar y parar
+
+**Qué queríamos saber.** El prompt pide que el modelo escriba una llamada a herramienta entre
+`<tool_call>` y `</tool_call>`. Queríamos saber si los modelos lo hacen bien y qué debe hacer el bucle
+cuando no.
+
+**Qué hicimos.** Fuimos añadiendo reglas en `ReActAgent` a medida que veíamos fallos en ejecuciones
+reales:
+
+- **Reparar la etiqueta.** Si hay más `<tool_call>` que `</tool_call>`, se añade el cierre antes de
+  leer la salida y antes de guardarla en memoria.
+- **Reintentar una vez.** Si no hay ninguna llamada válida, se añade a la traza un paso con el motivo
+  (el error del parser o "no tool call found") y se le dice al modelo, como mensaje de usuario, que
+  responda con un bloque `<tool_call>` o llame a `final_answer`. El aviso gasta un paso de
+  `max_steps`. Si falla otra vez seguida, se acepta lo que escribió, se marca `succeeded=False` y como
+  `final_answer` se usa el texto fuera de `<think>` y de los bloques (o, si no hay, el razonamiento).
+- **Parar al cerrar la llamada.** `generate` pasa `stop_strings=["</tool_call>"]` a
+  `model.generate`.
+- **Ejecutar solo la primera llamada** de cada turno, como pide el prompt ("exactly one tool").
+
+**Qué pasó.** Con `base`, en tres tareas de prueba, dos murieron en el primer intento: una por escribir
+`Action: search_medication_cima` en texto plano, sin bloque, y otra porque el modelo cerró el JSON pero
+paró antes de escribir `</tool_call>`, algo que vimos en el texto crudo y que no es un truncamiento
+(la salida era corta, y en el paso anterior la etiqueta sí estaba). La reparación resuelve el segundo
+caso. El reintento no resolvió el primero: en la pregunta de la cefotaxima, `base` volvió a escribir
+`Action: ...` en texto plano, y además dijo que la herramienta "was called, but no results were
+returned", cuando no se había llamado.
+
+Con `thinking` el formato era correcto, pero el modelo seguía escribiendo después de su llamada un
+`Observation:` inventado con resultados falsos, y a veces otra llamada o un `final_answer` completo.
+Todo eso quedaba en la memoria como si lo hubiera visto, y en un caso la generación llegó a los 1024
+tokens inventando la observación. Con la parada en `</tool_call>`, las dos generaciones que pudimos
+ver completas en la siguiente ejecución terminaron justo al cerrar la llamada, y la observación que veía el modelo era la
+real de CIMA. Con `rlm`, que se entrenó para `<think>...<answer>`, el formato falló en la prueba
+que hicimos ("12 por 7"): razonó bien y llegó a 84, pero escribió
+`<tool_call>{"final_answer": "84"}</tool_call>`, sin `name` ni `arguments`.
+
+**Qué concluimos.** La reparación y la parada son baratas y quitan fallos concretos. El reintento ayuda
+poco con los modelos pequeños, porque no recibe ningún ejemplo de cómo es una llamada correcta. No
+medimos la tasa de éxito con y sin cada regla: son casos sueltos que motivaron cada cambio. Dos
+cosas que deben quedar claras para interpretar resultados: la reparación cambia la salida del modelo
+antes de guardarla y la traza no lo refleja; y `succeeded=False` no significa que la respuesta sea
+mala, solo que no cerró con `final_answer`, como el 84 de `rlm`. Si en el futuro se quieren llamadas en
+paralelo, la parada en el primer `</tool_call>` hay que cambiarla. El plan es medir en el banco el
+efecto de la reparación y del reintento, y probar un ejemplo en el prompt.
+
+---
+
+### 2026-11-03 · Fase 4 · Reglas del prompt, razonamiento por cerebro y tokens
+
+**Qué queríamos saber.** Qué instrucciones darle al agente (idioma, uso de la base de conocimiento,
+citas), si cada cerebro debe razonar, y cómo contar los tokens que gasta una tarea.
+
+**Qué hicimos.** Decisiones y valores:
+
+- **`enable_thinking`:** `False` para `base` y `True` para `rlm` y `thinking`. Con `False` la plantilla
+  de Qwen3 pone un bloque de razonamiento vacío; es lo que usan `/rag` y el ejecutor de la fase 2 con
+  el modelo sin entrenar, y `tool_use/evaluate.py` lo fuerza a `True` con el adaptador porque se
+  entrenó para abrir `<think>` él mismo. `base` y `rlm` siguen esa convención. `thinking` no: es un
+  Qwen3-1.7B sin entrenar y le dejamos razonar porque ese cerebro existe para eso. Es decisión nuestra
+  y no la hemos contrastado con `False`. Para los resúmenes se desactiva siempre (parámetro
+  `thinking=False` de `generate`).
+- **`MAX_NEW_TOKENS = 1024`** por generación. Es un valor elegido a mano (en `/rag` es 1536); no lo
+  hemos ajustado.
+- **Reglas del prompt** (`agent/prompts.py`), añadidas en tres pasos, cada uno después de ver una
+  ejecución con `thinking`: (1) razonar y responder en español, y usar nombres de fármacos en español
+  en los argumentos; (2) para preguntas clínicas consultar `search_knowledge_base` antes de responder,
+  basarse solo en los pasajes, citar sus ids y, si no responden a la pregunta, decirlo en
+  `final_answer` en vez de contestar con conocimiento propio; (3) ampliar el español a todos los
+  argumentos, incluidas las consultas de búsqueda.
+- **`tokens_used`:** suma de los tokens de prompt y de los generados en todas las llamadas al modelo de
+  la tarea, incluidos los resúmenes de la memoria, con el tokenizador del cerebro usado. Como el prompt
+  se reenvía entero en cada paso, crece más que lineal con los pasos. No lo hemos contrastado con lo
+  que espera `agent/evaluate.py`, que solo promedia el campo.
+
+**Qué pasó.** Con `thinking` y la pregunta de la cefotaxima: sin reglas, llamó a CIMA con `cefotaxime`
+(en inglés) y no encontró nada; con la regla del español, usó `cefotaxima` y CIMA devolvió las
+presentaciones; con la regla de la base de conocimiento, buscó en ella primero y no repitió la llamada
+a CIMA. El razonamiento interno (`<think>`)
+sigue en inglés en `thinking`. En las respuestas que vimos, ninguno citó un id. Todo eso son
+casos con una sola pregunta, y cada cambio lo decidimos mirando la ejecución anterior.
+
+**Qué concluimos.** Las reglas de idioma y de uso de la base de conocimiento cambiaron lo que vimos en esa
+pregunta (el argumento de CIMA pasó a ser correcto y el modelo consultó primero la base de conocimiento), pero
+la de las citas no ha hecho que ningún modelo cite un id. Hemos
+ajustado el prompt a una sola pregunta, así que no sabemos cuánto de lo observado es mejora real:
+siguiendo la indicación de `agent/prompts.py`, cada cambio debe medirse en el banco de tareas, con y
+sin la regla. Los tokens de los distintos cerebros son comparables en la medida en que sus
+tokenizadores lo sean; no lo hemos verificado.
+
+---

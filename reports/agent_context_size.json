@@ -1,0 +1,30 @@
+{
+  "system_prompt_tokens": 1699,
+  "system_prompt_chars": 6380,
+  "search_knowledge_base top_k=3 tokens": {
+    "n": 20,
+    "min": 570,
+    "median": 676,
+    "max": 822
+  },
+  "search_knowledge_base top_k=3 chars": {
+    "n": 20,
+    "min": 1877,
+    "median": 2140,
+    "max": 2457
+  },
+  "search_knowledge_base top_k=5 tokens": {
+    "n": 20,
+    "min": 851,
+    "median": 1097,
+    "max": 1361
+  },
+  "search_knowledge_base top_k=5 chars": {
+    "n": 20,
+    "min": 2825,
+    "median": 3471,
+    "max": 3978
+  },
+  "search_medication_cima cefotaxima tokens": 454,
+  "search_medication_cima cefotaxima chars": 1084
+}
