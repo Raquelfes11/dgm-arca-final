@@ -1,6 +1,6 @@
 """Phase 2 evaluation: does the model pick the right tool with the right arguments?
 
-The benchmark is a JSONL file (``tool_use/bench/cases.jsonl``) where each line holds a user
+The benchmark is a JSONL file (tool_use/bench/cases.jsonl) where each line holds a user
 query and the expected first tool call::
 
     {"id": "c12", "category": "calculo",
@@ -8,27 +8,27 @@ query and the expected first tool call::
      "needs_tool": true, "expected_tool": "dose_calculator",
      "expected_arguments": {"expression": "15 * 70"}, "expected_answer": 1050}
 
-Optional fields: ``expected_answer`` (number the final answer must contain), ``expected_sequence``
-(tools of a multi-step case, in order), ``free_text_args`` (arguments only checked for presence,
-such as the free-text ``steps`` of a preparation sheet) and ``notes``.
+Optional fields: expected_answer (number the final answer must contain), expected_sequence
+(tools of a multi-step case, in order), free_text_args (arguments only checked for presence,
+such as the free-text steps of a preparation sheet) and notes.
 
-Include cases where *no* tool is needed: a model that calls tools for everything is not
+Include cases where no tool is needed: a model that calls tools for everything is not
 using them well. The metrics are:
 
 * tool selection accuracy: the first call names the expected tool (or there is no call when
-  ``needs_tool`` is false);
+  needs_tool is false);
 * argument accuracy: among correct selections, the arguments match. Matching is semantic:
-  expressions are compared by value (``15*70`` equals ``70 * 15``), units are compared by
-  conversion (``mcg`` equals ``µg``), numbers by value, and arguments left at the tool's default
-  value count as given (``max_results=5`` equals omitting it);
+  expressions are compared by value (15*70 equals 70 * 15), units are compared by
+  conversion (mcg equals µg), numbers by value, and arguments left at the tool's default
+  value count as given (max_results=5 equals omitting it);
 * answer accuracy (final answer): the final text contains the expected number, within a small
-  tolerance. It is only defined for cases with ``expected_answer``.
+  tolerance. It is only defined for cases with expected_answer.
 
 The same model can be run in two conditions on the same cases: with the tools, and without them
-(the model answers on its own). The model comes from ``--model-id`` or, if absent, from
-``ARCA_RLM_BASE_MODEL`` in your ``.env`` (see ``.env.example``), and it is always passed to the
+(the model answers on its own). The model comes from --model-id or, if absent, from
+ARCA_RLM_BASE_MODEL in your .env (see .env.example), and it is always passed to the
 executor explicitly, so the executor does not need the adapter variables. Tools with side
-effects (the preparation sheet) are not executed unless ``--allow-side-effects`` is passed: the
+effects (the preparation sheet) are not executed unless --allow-side-effects is passed: the
 benchmark only needs the first call, and this keeps it free of files. Run::
 
     uv run python -m tool_use.evaluate --bench tool_use/bench/cases.jsonl \\
@@ -111,7 +111,7 @@ def _registry():
 
 
 def _defaults(tool_name: str) -> dict[str, Any]:
-    """Default values of the tool's optional parameters (for example ``max_results=5``)."""
+    """Default values of the tool's optional parameters (for example max_results=5)."""
     tool = _registry().tools.get(tool_name)
     if tool is None:
         return {}
@@ -123,7 +123,7 @@ def _defaults(tool_name: str) -> dict[str, Any]:
 
 
 def _same_unit(a: Any, b: Any) -> bool:
-    """Same unit by name, or equal by conversion with Pint (``mcg`` equals ``µg``)."""
+    """Same unit by name, or equal by conversion with Pint (mcg equals µg)."""
     if _compact(a) == _compact(b):
         return True
     try:
@@ -169,8 +169,8 @@ def arguments_match(
     """Do the arguments of a call match the expected ones?
 
     Parameters left at their default are filled in on both sides before comparing, and the
-    ``free_text_args`` only need to be present and non-empty. With ``ignore_optional``, an
-    optional parameter the expected call does not mention (``max_results``, ``decimals``) may
+    free_text_args only need to be present and non-empty. With ignore_optional, an
+    optional parameter the expected call does not mention (max_results, decimals) may
     take any value: choosing 10 results instead of 5 is not a wrong call.
     """
     defaults = _defaults(tool_name)
@@ -220,9 +220,9 @@ _THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL)
 def strip_thinking(text: str) -> str:
     """Remove the reasoning from a completion, keeping only what the user would read.
 
-    A model trained to reason (phase 1) writes ``<think> ... </think>`` before answering and
+    A model trained to reason (phase 1) writes <think> ... </think> before answering and
     the intermediate numbers of that reasoning must not count as the answer. Handles a closed
-    block, a block cut by the token limit (everything after ``<think>`` is dropped) and a
+    block, a block cut by the token limit (everything after <think> is dropped) and a
     closing tag without an opening one (the template may have opened it in the prompt).
     """
     text = _THINK_BLOCK.sub("", text)
@@ -234,17 +234,17 @@ def strip_thinking(text: str) -> str:
 
 
 def has_unfinished_thinking(text: str) -> bool:
-    """True if the completion opened a ``<think>`` block and never closed it (ran out of tokens)."""
+    """True if the completion opened a <think> block and never closed it (ran out of tokens)."""
     return "<think>" in _THINK_BLOCK.sub("", text)
 
 
 def answer_ok(case: dict[str, Any], answer: str) -> bool | None:
-    """Does the final answer contain the expected number? ``None`` if the case has none.
+    """Does the final answer contain the expected number? None if the case has none.
 
     Numbers that already appear in the query are ignored (so repeating the data does not count),
     unless the expected answer is one of them. This is a heuristic: it can miss a correct answer
     written in words and cannot tell the right number in the wrong sentence. The reasoning
-    (``<think>`` block) is not part of the answer and is removed before looking for the number.
+    (<think> block) is not part of the answer and is removed before looking for the number.
     """
     expected = case.get("expected_answer")
     if expected is None:
@@ -324,7 +324,7 @@ def summarise_answers(rows: list[dict[str, Any]]) -> dict[str, Any]:
 def summarise(rows: list[dict[str, Any]]) -> dict[str, Any]:
     """Aggregate the per-case scores of the with-tools condition.
 
-    Selection and argument accuracy divide by *all* cases, so an error in selection also
+    Selection and argument accuracy divide by all cases, so an error in selection also
     counts against arguments. The rates of false calls (a tool called when none was needed)
     and of missed calls (a tool needed but none called) are reported on their own.
     """
@@ -414,8 +414,8 @@ def build_summary(rows: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
 def rescore(data: dict[str, Any]) -> dict[str, Any]:
     """Recompute every score of a saved run from its stored calls and answers (no model needed).
 
-    Use it when the scoring changes: the raw behaviour of the model (``tool_calls`` and
-    ``answer``) is kept in the file, only the derived fields are rewritten.
+    Use it when the scoring changes: the raw behaviour of the model (tool_calls and
+    answer) is kept in the file, only the derived fields are rewritten.
     """
     for row in data["rows"].get("tools", []):
         row.update(score_case(row, row["tool_calls"]))
@@ -447,12 +447,12 @@ def _run_with_tools(loop, case: dict[str, Any], max_turns: int) -> dict[str, Any
 def no_tools_messages(query: str, prompt: str = "neutral") -> list[dict[str, str]]:
     """Conversation of the no-tools condition.
 
-    ``neutral`` is a plain instruction, the same for every model. ``phase1`` is the system
-    prompt the reasoning model was trained and evaluated with (``<think>``/``<answer>``), so a
+    neutral is a plain instruction, the same for every model. phase1 is the system
+    prompt the reasoning model was trained and evaluated with (<think>/<answer>), so a
     fine-tuned adapter is not penalised in the baseline for being used off-distribution.
     """
     if prompt == "phase1":
-        from rlm.data import build_prompt  # lazy: pulls in ``datasets``
+        from rlm.data import build_prompt  # lazy: pulls in datasets
 
         return build_prompt(query)
     return [
@@ -464,9 +464,9 @@ def no_tools_messages(query: str, prompt: str = "neutral") -> list[dict[str, str
 def apply_adapter(loop, adapter: str) -> None:
     """Put a LoRA adapter (local folder or Hugging Face repo id) on top of the loaded base model.
 
-    ``ToolLoop.load`` only loads the base model; this is the same ``PeftModel.from_pretrained``
-    that ``rlm/inference.py`` uses for the phase-1 model. The base model the adapter was trained
-    on (stored in its config) must be the one in ``loop``; a mismatch is reported, not hidden.
+    ToolLoop.load only loads the base model; this is the same PeftModel.from_pretrained
+    that rlm/inference.py uses for the phase-1 model. The base model the adapter was trained
+    on (stored in its config) must be the one in loop; a mismatch is reported, not hidden.
     """
     from peft import PeftConfig, PeftModel
 
@@ -477,11 +477,11 @@ def apply_adapter(loop, adapter: str) -> None:
 
 
 def enable_thinking(loop) -> None:
-    """Let the model write its ``<think>`` block, as it did in phase 1.
+    """Let the model write its <think> block, as it did in phase 1.
 
-    ``ToolLoop.generate`` always renders the chat template with ``enable_thinking=False``, which
+    ToolLoop.generate always renders the chat template with enable_thinking=False, which
     pre-fills an empty think block. That is right for vanilla Qwen3 but off-distribution for a
-    model trained to open ``<think>`` itself. The template flag is overridden here so the
+    model trained to open <think> itself. The template flag is overridden here so the
     executor (not ours) stays untouched.
     """
     original = loop.tokenizer.apply_chat_template
