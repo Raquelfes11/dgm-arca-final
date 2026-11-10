@@ -50,7 +50,7 @@ from datasets import Dataset, load_dataset
 
 from rlm.data import build_prompt
 
-WARMUP_FRACTION = 0.05
+WARMUP_FRACTION = 0.05  # share of the optimizer steps spent ramping the learning rate up
 
 
 def load_verified_traces(path: str | Path) -> Dataset:
@@ -62,11 +62,10 @@ def load_verified_traces(path: str | Path) -> Dataset:
 
 
 def to_prompt_completion(dataset: Dataset) -> Dataset:
-    """
-    Turn distilled traces into TRL's prompt/completion conversational format.
+    """Turn distilled traces into TRL's prompt/completion conversational format.
 
     Expected fields: question and trace (the full <think>…</think><answer>…</answer> text).
-    The prompt is the same one used at inference (rlm.data.build_prompt), so the student is 
+    The prompt is the same one used at inference (rlm.data.build_prompt), so the student is
     trained on exactly what it will see later, without the Spanish hint that the
     teacher needed.
     """
@@ -87,8 +86,7 @@ def load_sft_dataset(path: str | Path) -> Dataset:
 def split_by_problem(
     dataset: Dataset, eval_fraction: float, seed: int = 0
 ) -> tuple[Dataset, Dataset | None]:
-    """
-    Hold out whole problems for evaluation.
+    """Hold out whole problems for evaluation.
 
     Every problem has several traces with the same statement, so splitting by row would leak:
     a trace in the evaluation set would have its twin in the training set. The split is
@@ -127,8 +125,7 @@ def length_report(lengths: Sequence[int]) -> dict:
 
 
 def drop_overlong(dataset: Dataset, tokenizer, max_length: int) -> tuple[Dataset, dict]:
-    """
-    Remove examples longer than max_length tokens instead of letting the trainer cut them.
+    """Remove examples longer than max_length tokens instead of letting the trainer cut them.
 
     Returns the filtered dataset and the length report (with the number of dropped examples).
     """
@@ -184,7 +181,7 @@ def train(args: argparse.Namespace) -> None:
         per_device_eval_batch_size=args.batch_size,
         gradient_accumulation_steps=args.grad_accum,
         max_length=args.max_length,
-        completion_only_loss=True,
+        completion_only_loss=True,  # the loss covers the assistant turn only, not the prompt
         bf16=torch.cuda.is_available(),
         gradient_checkpointing=True,
         logging_steps=5,

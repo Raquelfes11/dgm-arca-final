@@ -30,7 +30,7 @@ FORMAT_PATTERN = re.compile(
     r"\s*<answer>(?P<answer>(?:(?!</?answer>).)*)</answer>\s*$",
     re.DOTALL,
 )
-# Looser pattern used to *extract* an answer even when the format is imperfect.
+# Looser pattern used to extract an answer even when the format is imperfect.
 ANSWER_PATTERN = re.compile(r"<answer>(?P<answer>.*?)</answer>", re.DOTALL)
 # Fallback for math-style completions that finish with \boxed{...}.
 BOXED_PATTERN = re.compile(r"\\boxed\{(?P<answer>[^{}]*)\}")
@@ -55,8 +55,7 @@ def has_valid_format(text: str) -> bool:
 
 
 def extract_answer(text: str) -> str | None:
-    """
-    Extract the final answer from a completion.
+    """Extract the final answer from a completion.
 
     Priority: the <answer> block, then a \\boxed{} expression. Returns None
     when neither is present, so that callers can distinguish "no answer" from "wrong answer".
@@ -71,9 +70,8 @@ def extract_answer(text: str) -> str | None:
     return None
 
 def _parse_raw_number(raw: str) -> str:
-    """
-    Turn a matched number token into a dot-decimal string, understanding the decimal comma.
- 
+    """Turn a matched number token into a dot-decimal string, understanding the decimal comma.
+
     "243,75" -> "243.75" (Spanish decimal comma) and "1,234,567" -> "1234567"
     (thousands separators). A single comma followed by exactly three digits is read as a
     thousands separator ("1,250" -> "1250", the GSM8K convention) unless the integer
@@ -93,8 +91,7 @@ def _parse_raw_number(raw: str) -> str:
     return f"{head}.{tail}"  # 243,75 / 0,125 / 2,5 -> decimal comma
 
 def normalize_number(text: str) -> str | None:
-    """
-    Pull the last number out of a piece of text and normalise it.
+    """Pull the last number out of a piece of text and normalise it.
 
     "The answer is $1,234.50." -> "1234.5"; "12" -> "12"; no number -> None.
     We take the last number because models often restate intermediate values before
@@ -132,7 +129,7 @@ UNIT_ALIASES = {
     "mL/h": {"ml/h", "ml/hr", "ml/hora", "ml/horas", "mlporhora"},
     "mL/min": {"ml/min", "ml/minuto", "ml/minute", "mlpormin", "mlporminuto"},
     "mg/mL": {"mg/ml", "mg/milliliter", "mg/millilitre"},
-    # Continuous-infusion dose. NFKC (see ``normalize_unit``) turns the micro sign U+00B5 into
+    # Continuous-infusion dose. NFKC (see normalize_unit) turns the micro sign U+00B5 into
     # the Greek mu U+03BC, so a single spelling of the alias covers both.
     "mcg/kg/min": {
         "mcg/kg/min", "\u03bcg/kg/min", "ug/kg/min",
@@ -143,8 +140,7 @@ UNIT_ALIASES = {
 
 
 def normalize_unit(unit: str) -> str | None:
-    """
-    Return the canonical representation of a unit.
+    """Return the canonical representation of a unit.
 
     Examples:
         "ml" -> "mL"
@@ -164,8 +160,7 @@ def normalize_unit(unit: str) -> str | None:
 
 
 def extract_final_unit(text: str) -> str | None:
-    """
-    Extract the unit associated with the final numerical answer.
+    """Extract the unit associated with the final numerical answer.
 
     The function looks near the last number in the extracted answer, rather
     than searching the whole reasoning trace. This prevents intermediate
@@ -230,8 +225,7 @@ def format_reward(prompts: Sequence, completions: Sequence, **kwargs) -> list[fl
 def accuracy_reward(
     prompts: Sequence, completions: Sequence, answer: Sequence[str], **kwargs
 ) -> list[float]:
-    """
-    1.0 if the extracted final answer matches the ground truth numerically, else 0.0.
+    """1.0 if the extracted final answer matches the ground truth numerically, else 0.0.
 
     answer is the dataset column holding the ground truth (one per completion).
     """

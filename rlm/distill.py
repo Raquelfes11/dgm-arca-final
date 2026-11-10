@@ -72,11 +72,11 @@ SPANISH_HINT = (
     "<answer>12,5 mL/h</answer>), con el redondeo que pida el enunciado."
 )
 
-# Qwen3 thinks in English even when the question and the instructions are in Spanish. The 
-# hint above is not enough, so the teacher's reasoning is *started for it* in Spanish: the 
-# prompt ends with an open <think> block and this opening sentence, and the model continues 
-# from there. The sentence is kept as the first words of the trace, so the student sees it
-# too. --no-prefill disables it.
+# Qwen3 thinks in English even when the question and the instructions are in Spanish (seen in
+# the pilot: correct answers, English reasoning). The hint above is not enough, so the
+# teacher's reasoning is started for it in Spanish: the prompt ends with an open <think>
+# block and this opening sentence, and the model continues from there. The sentence is kept
+# as the first words of the trace, so the student sees it too. --no-prefill disables it.
 THINK_PREFILL = "<think>\nVale, voy a resolverlo paso a paso."
 
 # Reasons a generation can be rejected, in the order they are checked.
@@ -150,8 +150,7 @@ def problem_level(problem: dict) -> str:
 def select_problems(
     problems: Sequence[dict], per_family: int | None = None, limit: int | None = None, seed: int = 0
 ) -> list[tuple[int, dict]]:
-    """
-    Return (id, problem) pairs, where id is the row index in the full file.
+    """Return (id, problem) pairs, where id is the row index in the full file.
 
     per_family takes that many random problems of every family (a balanced pilot);
     limit truncates the result. The ids refer to the full file, so a pilot and the
@@ -184,8 +183,7 @@ def teacher_messages(question: str) -> list[dict]:
 # From raw teacher text to a canonical trace
 
 def split_teacher_output(raw: str) -> tuple[str | None, str | None]:
-    """
-    Split Qwen3's output into (thinking, final_text).
+    """Split Qwen3's output into (thinking, final_text).
 
     In thinking mode the model writes its reasoning, closes it with </think> and then
     writes the visible answer. The opening <think> may or may not be part of the
@@ -207,8 +205,7 @@ def last_answer(final_text: str) -> str | None:
 
 
 def clean_answer(answer: str) -> str:
-    """
-    Remove LaTeX leftovers from the content of an <answer> block.
+    """Remove LaTeX leftovers from the content of an <answer> block.
 
     The teacher sometimes writes math-mode decimals such as 20{,}20 mL or \\text{mL}.
     normalize_number would read 20{,}20 as the two numbers 20 and 20 and reject a right
@@ -221,8 +218,7 @@ def clean_answer(answer: str) -> str:
 
 
 def tidy_whitespace(text: str) -> str:
-    """
-    Collapse runs of spaces/tabs into one space (newlines are kept).
+    """Collapse runs of spaces/tabs into one space (newlines are kept).
 
     The first pilot showed double spaces after every full stop (the prefill used to end with a
     space, which the teacher then imitated). They carry no meaning and cost tokens, so they are
@@ -258,12 +254,11 @@ def judge_generation(
     min_spanish_ratio: float = 0.6,
     max_trace_tokens: int = 1800,
 ) -> dict:
-    """
-    Give one raw generation its verdict. Returns the record plus the judging fields.
+    """Give one raw generation its verdict. Returns the record plus the judging fields.
 
     Added keys: verdict (accepted or a rejection reason, see REASONS), trace
     (canonical text, None if it could not be built), predicted and detail.
-    Correctness is checked *before* the quality filters, so the reasons too_short,
+    Correctness is checked before the quality filters, so the reasons too_short,
     not_spanish and too_long only ever apply to traces that were correct.
     """
     out = dict(record)
@@ -318,8 +313,7 @@ def judge_generation(
 def select_traces(
     judged: Iterable[dict], keep_per_problem: int = 2, strategy: str = "shortest", seed: int = 0
 ) -> list[dict]:
-    """
-    Keep at most keep_per_problem accepted traces per problem.
+    """Keep at most keep_per_problem accepted traces per problem.
 
     Several traces per problem give the student diversity, but four copies of the same easy
     problem would over-weight it. shortest prefers concise reasoning (a 0.6B model
@@ -442,8 +436,7 @@ def write_jsonl(path: str | Path, rows: Iterable[dict]) -> None:
 # Generation (GPU)
 
 def _generate_group(model, tokenizer, prompts: list[str], n: int, max_new_tokens: int):
-    """
-    Sample n completions for each prompt. Returns [(text, n_tokens, finished)].
+    """Sample n completions for each prompt. Returns [(text, n_tokens, finished)].
 
     The result is prompt-major: the n samples of prompt 0 come first, then those of
     prompt 1, and so on (num_return_sequences orders them like that). On a CUDA
@@ -464,7 +457,7 @@ def _generate_group(model, tokenizer, prompts: list[str], n: int, max_new_tokens
                 **TEACHER_SAMPLING,
             )
     except torch.cuda.OutOfMemoryError:
-        pass
+        pass  # handled below, outside the except block, so the failed tensors can be freed
 
     if output is None:
         torch.cuda.empty_cache()
@@ -508,8 +501,7 @@ def generate_traces(
     seed: int = 0,
     prefill: bool = True,
 ) -> int:
-    """
-    Generate samples teacher completions per problem and append them to raw_output.
+    """Generate samples teacher completions per problem and append them to raw_output.
 
     Problems whose id is already in raw_output are skipped, which makes the function
     resumable. Each batch is written to disk right after it finishes. With prefill the
@@ -527,7 +519,7 @@ def generate_traces(
         return 0
 
     tokenizer = AutoTokenizer.from_pretrained(teacher)
-    tokenizer.padding_side = "left"
+    tokenizer.padding_side = "left"  # generation continues from the right edge of the prompt
     model = AutoModelForCausalLM.from_pretrained(teacher, dtype=torch.bfloat16)
     model.to("cuda" if torch.cuda.is_available() else "cpu").eval()
 

@@ -43,8 +43,7 @@ SPANISH_THINKING = (
 
 
 def make_record(raw: str, **overrides) -> dict:
-    """
-    Build one raw teacher generation, as rlm.distill writes it to disk.
+    """Build one raw teacher generation, as rlm.distill writes it to disk.
 
     Defaults describe a finished dilution problem whose answer is 95 mL; pass keyword
     arguments (finished=False, n_new_tokens=1900...) to override any field.
@@ -207,8 +206,7 @@ class TestJudgeGeneration:
 
 class TestSelectTraces:
     def judged(self):
-        """
-        Problem 7: three accepted traces (900, 300, 600 tokens) and one wrong.
+        """Problem 7: three accepted traces (900, 300, 600 tokens) and one wrong.
         Problem 8: only a wrong one.
         """
         rows = []
@@ -278,8 +276,7 @@ def test_teacher_messages_ask_for_spanish_without_changing_the_question():
 
 
 def test_filter_summary_and_sft_rows_end_to_end():
-    """
-    Three generations (one accepted, one wrong value, one truncated) go through
+    """Three generations (one accepted, one wrong value, one truncated) go through
     filtering, the summary and the conversion to an SFT row.
     """
     raw = [
@@ -305,4 +302,4 @@ def test_filter_summary_and_sft_rows_end_to_end():
 
     row = to_sft_row(selected[0])
     assert row["verified"] is True and has_valid_format(row["trace"])
-    assert {"question", "trace", "verified"} <= row.keys()
+    assert {"question", "trace", "verified"} <= row.keys()  # what rlm.train_sft reads

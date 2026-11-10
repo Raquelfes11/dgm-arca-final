@@ -24,7 +24,7 @@ Statistics, kept deliberately simple because each set has only 100-200 problems:
   95 % interval is Newcombe's, built from the two Wilson intervals (the two sets contain
   different problems, so the samples are independent). If the interval contains 0 the drop
   cannot be told apart from noise with this many problems.
-* SFT vs GRPO on the same set are scored on the *same* problems, so the comparison is
+* SFT vs GRPO on the same set are scored on the same problems, so the comparison is
   paired: we count the problems that only one of the two solves and run an exact two-sided
   sign test on them (McNemar's exact test). It is much more sensitive than comparing two
   separate intervals.
@@ -305,8 +305,7 @@ def load_results(path: str | Path) -> dict:
 
 
 def rescore_rows(rows: Sequence[Row], lookup: dict, verify: Callable) -> list[Row]:
-    """
-    Score the stored generations again with the current verifier (nothing is generated).
+    """Score the stored generations again with the current verifier (nothing is generated).
 
     lookup maps the question to (answer_unit, answer_unit_aliases) and verify has
     the signature of MedicationVerifier.verify. The previous verdict is kept in
