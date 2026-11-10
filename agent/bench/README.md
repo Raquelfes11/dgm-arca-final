@@ -67,6 +67,14 @@ uv run python -m agent.evaluate --bench agent/bench/tasks.jsonl --brains base rl
 medios de las tareas principales, las mismas cifras de las de borde en `edge`, el desglose
 por `category` y cada fila con las herramientas que usó.
 
+Para entender los resultados, y no solo la tasa de éxito, `analyze_eval` saca las tablas del
+informe (éxito fiel, pasos sin llamada válida, respuestas vacías, uso de la base de
+conocimiento, clases de fallo y resultado por tarea):
+
+```bash
+uv run python -m agent.analyze_eval --markdown reports/phase4_analysis.md
+```
+
 `validate_bench` hay que pasarlo cada vez que se vuelva a descargar el corpus: CIMA actualiza
 las fichas y una cifra puede cambiar.
 
