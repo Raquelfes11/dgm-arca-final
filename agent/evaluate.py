@@ -1,15 +1,15 @@
 """Phase 4 evaluation: success rate, steps and tokens on multi-tool tasks, per brain.
 
-Each line of the benchmark (``agent/bench/tasks.jsonl``, see ``agent/bench/README.md``) has a
+Each line of the benchmark (agent/bench/tasks.jsonl, see agent/bench/README.md) has a
 task, the tools that must be involved, and a way to check the final answer automatically (a
 number, a substring, a regex, or several of them). Twenty tasks that need at least two tools is
-the minimum; tasks with ``"core": false`` are edge cases (impossible, blocked or broken tools)
+the minimum; tasks with "core": false are edge cases (impossible, blocked or broken tools)
 that are reported apart. Run every brain::
 
     uv run python -m agent.evaluate --bench agent/bench/tasks.jsonl --brains base rlm thinking
 
 and put the resulting table in your report next to the JSON-vs-code-agent comparison.
-Before the first run, ``uv run python -m agent.validate_bench`` checks the benchmark itself.
+Before the first run, uv run python -m agent.validate_bench checks the benchmark itself.
 """
 
 from __future__ import annotations
@@ -34,8 +34,8 @@ def _fold(text: str) -> str:
 def _readings(token: str) -> list[float]:
     """Every value an unsigned number token can mean.
 
-    ``7,5`` is 7.5; ``1.050`` is 1.05 (English) or 1050 (Spanish thousands), and both are
-    returned because the text does not say which one was meant; ``1.050,5`` is 1050.5.
+    7,5 is 7.5; 1.050 is 1.05 (English) or 1050 (Spanish thousands), and both are
+    returned because the text does not say which one was meant; 1.050,5 is 1050.5.
     """
     dots, commas = token.count("."), token.count(",")
     if not dots and not commas:
@@ -55,7 +55,7 @@ def _readings(token: str) -> list[float]:
 
 
 def number_values(text: str) -> list[float]:
-    """Every value that the numbers written in ``text`` can mean (see ``_readings``)."""
+    """Every value that the numbers written in text can mean (see _readings)."""
     values = []
     for token in _NUMBER.findall(text):
         sign = -1.0 if token.startswith("-") else 1.0
@@ -64,12 +64,12 @@ def number_values(text: str) -> list[float]:
 
 
 def check_answer(task: dict, final_answer: str) -> bool:
-    """Automatic check of the final answer, according to the task's ``check`` field.
+    """Automatic check of the final answer, according to the task's check field.
 
-    Kinds: ``contains`` (ignores case and accents), ``regex`` (as written: use ``(?i)`` for
-    case), ``number`` (any number in the answer within ``tolerance`` of ``value``; reads
-    ``7,5`` and ``1.050`` the Spanish way too), ``all`` and ``any`` (lists of checks in
-    ``checks``). Any check can set ``"negate": true`` to require the opposite.
+    Kinds: contains (ignores case and accents), regex (as written: use (?i) for
+    case), number (any number in the answer within tolerance of value; reads
+    7,5 and 1.050 the Spanish way too), all and any (lists of checks in
+    checks). Any check can set "negate": true to require the opposite.
     """
     return _check(task.get("check", {}), final_answer)
 

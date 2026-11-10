@@ -1,6 +1,6 @@
 """The phase-4 benchmark and its checker, without loading any model.
 
-The corpus (``rag/corpus/*.md``) is not in git, so the evidence test is skipped when it has
+The corpus (rag/corpus/*.md) is not in git, so the evidence test is skipped when it has
 not been downloaded; everything else runs anywhere.
 """
 
@@ -144,7 +144,7 @@ def test_every_line_is_valid_json_with_a_spanish_or_english_task(tasks):
 
 
 def test_reference_answers_pass_their_own_check(tasks):
-    """The ``solution`` text written for each task must be accepted by its check."""
+    """The solution text written for each task must be accepted by its check."""
     for task in tasks:
         if "solution" in task and not task.get("expected_behaviour"):
             assert check_answer(task, task["solution"]), task["id"]
