@@ -1,12 +1,12 @@
 """Retrieval: similarity search, keyword search (BM25) and the hybrid of both.
 
-All three retrievers return the same ``Hit`` objects, so ``rag/generate.py`` and
-``rag/evaluate.py`` do not care which one is used:
+All three retrievers return the same Hit objects, so rag/generate.py and
+rag/evaluate.py do not care which one is used:
 
-* ``BM25Retriever``: keyword ranking, the lexical baseline.
-* ``DenseRetriever``: instruction-aware embeddings and cosine similarity over a NumPy matrix
+* BM25Retriever: keyword ranking, the lexical baseline.
+* DenseRetriever: instruction-aware embeddings and cosine similarity over a NumPy matrix
   that is saved to disk, so the corpus is embedded only once.
-* ``HybridRetriever``: ``λ · bm25 + (1 - λ) · dense`` over min-max normalised scores.
+* HybridRetriever: λ · bm25 + (1 - λ) · dense over min-max normalised scores.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ class Hit:
 
 
 def tokenize(text: str) -> list[str]:
-    """Lower-case words and numbers, without accents and with ``0,9`` written as ``0.9``.
+    """Lower-case words and numbers, without accents and with 0,9 written as 0.9.
 
     Accents are dropped because students type "perfusion" as often as "perfusión", and the
     decimal comma is unified so that "0,9 %" in a data sheet matches "0.9" in a question.
@@ -74,15 +74,15 @@ def _fingerprint(chunks: list[Chunk], model_id: str) -> str:
 class DenseRetriever:
     """Embed the chunks once, store them, embed the query and rank by cosine similarity.
 
-    Passages are embedded without instruction and the query with ``query_instruction`` (the
-    default of ``rag.embed`` when ``None``). Since passage vectors do not depend on the
-    instruction, you can change ``query_instruction`` on a built retriever and compare
+    Passages are embedded without instruction and the query with query_instruction (the
+    default of rag.embed when None). Since passage vectors do not depend on the
+    instruction, you can change query_instruction on a built retriever and compare
     instructions without re-embedding the corpus.
 
-    The vectors are saved in ``persist_dir`` (``rag/index/``, outside git) as
-    ``dense_<fingerprint>.npz``. The fingerprint depends on the embedding model and on the
+    The vectors are saved in persist_dir (rag/index/, outside git) as
+    dense_<fingerprint>.npz. The fingerprint depends on the embedding model and on the
     exact text of every chunk, so a different chunking strategy, threshold or corpus gets its
-    own file and a stale index is never loaded. ``persist_dir=None`` keeps everything in
+    own file and a stale index is never loaded. persist_dir=None keeps everything in
     memory. With a few hundred chunks an exact matrix product is instantaneous and the score
     is exactly the cosine similarity, so no approximate index is needed.
     """
@@ -182,11 +182,11 @@ def _minmax(scores: list[float]) -> list[float]:
 class HybridRetriever:
     """s_hybrid = λ · s_bm25 + (1 - λ) · s_dense, on scores rescaled to [0, 1].
 
-    Take the top ``pool`` hits from each retriever, min-max normalise each score list so
-    they are comparable, merge by chunk id, and return the top ``top_k`` by the weighted
-    sum. A chunk found by only one retriever gets 0 from the other. ``weight_bm25`` is λ
+    Take the top pool hits from each retriever, min-max normalise each score list so
+    they are comparable, merge by chunk id, and return the top top_k by the weighted
+    sum. A chunk found by only one retriever gets 0 from the other. weight_bm25 is λ
     and can be changed on a built retriever, which is what the λ sweep in
-    ``rag/evaluate.py`` does: λ = 1 is BM25 alone and λ = 0 is the dense retriever alone.
+    rag/evaluate.py does: λ = 1 is BM25 alone and λ = 0 is the dense retriever alone.
     The returned score is the weighted sum, always in [0, 1].
     """
 
@@ -228,7 +228,7 @@ def build_retrievers(
     pool: int = 20,
     query_instruction: str | None = None,
 ) -> dict[str, BM25Retriever | DenseRetriever | HybridRetriever]:
-    """The three retrievers over the same chunks, keyed by the ``retriever`` name of ``/rag``."""
+    """The three retrievers over the same chunks, keyed by the retriever name of /rag."""
     bm25 = BM25Retriever(chunks)
     dense = DenseRetriever(
         chunks, embedder, persist_dir=persist_dir, query_instruction=query_instruction
