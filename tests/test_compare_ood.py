@@ -17,7 +17,7 @@ from rlm.compare_ood import (
 
 
 def row(question, correct, family="infusion", predicted="5 mL/h", fmt=True, value_ok=None):
-    """One result row as ``rlm.evaluate`` writes it (``value_ok`` feeds the fake verifier)."""
+    """One result row as rlm.evaluate writes it (value_ok feeds the fake verifier)."""
     return {
         "question": question,
         "family": family,
@@ -30,6 +30,7 @@ def row(question, correct, family="infusion", predicted="5 mL/h", fmt=True, valu
 
 
 def value_matches(r):
+    """Fake value check: reads the flag that row stored in _value_ok."""
     return r["_value_ok"]
 
 
@@ -171,8 +172,9 @@ def test_format_markdown_with_one_model_has_no_pairs():
     assert "Comparación pareada" not in text
 
 
-# ---- rescoring stored generations with the current verifier -----------------------------
+# rescoring stored generations with the current verifier
 class FakeResult:
+    """Stand-in for the verifier's result: only the two fields compare_ood reads."""
     def __init__(self, is_correct, predicted):
         self.is_correct = is_correct
         self.predicted = predicted
@@ -184,6 +186,7 @@ def fake_verify(raw, expected, unit, aliases):
 
 
 def stored_row(question, raw, correct):
+    """A row as stored in a results file, with the raw generation that gets rescored."""
     return {
         "question": question,
         "family": "infusion_inverse",
