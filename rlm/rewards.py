@@ -1,19 +1,19 @@
 """Verifiable reward functions for reasoning training (RLVR).
 
 These are the two rewards DeepSeek used for R1-Zero, exactly as discussed in
-class: a *format* reward that checks the ``<think>...</think><answer>...</answer>``
-structure, and an *accuracy* reward that compares the final answer against the
+class: a format reward that checks the <think>...</think><answer>...</answer>
+structure, and an accuracy reward that compares the final answer against the
 ground truth using a deterministic verifier.
 
-Both functions follow the signature expected by ``trl.GRPOTrainer``:
+Both functions follow the signature expected by trl.GRPOTrainer:
 
     reward_fn(prompts, completions, **kwargs) -> list[float]
 
-``kwargs`` receives every extra column of the training dataset (for example
-``answer``), which is how the ground truth reaches the reward function.
+kwargs receives every extra column of the training dataset (for example
+answer), which is how the ground truth reaches the reward function.
 
 Completions may arrive as plain strings or as conversational messages
-(``[{"role": "assistant", "content": "..."}]``). ``_completion_text`` handles both.
+([{"role": "assistant", "content": "..."}]). _completion_text handles both.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ import unicodedata
 from collections.abc import Sequence
 
 # Full structure: a single think block followed by a single answer block, nothing else.
-# The tempered groups ``(?:(?!</?tag>).)*`` forbid a second opening/closing tag inside a block,
+# The tempered groups (?:(?!</?tag>).)* forbid a second opening/closing tag inside a block,
 # so "<answer>4</answer><answer>5</answer>" is rejected instead of silently accepted.
 FORMAT_PATTERN = re.compile(
     r"^\s*<think>(?P<think>(?:(?!</?think>).)*)</think>"
@@ -50,19 +50,20 @@ def _completion_text(completion: str | Sequence[dict]) -> str:
 
 
 def has_valid_format(text: str) -> bool:
-    """True when the completion is exactly ``<think>...</think><answer>...</answer>``."""
+    """True when the completion is exactly <think>...</think><answer>...</answer>."""
     return FORMAT_PATTERN.match(text) is not None
 
 
 def extract_answer(text: str) -> str | None:
-    """Extract the final answer from a completion.
+    """
+    Extract the final answer from a completion.
 
-    Priority: the ``<answer>`` block, then a ``\\boxed{}`` expression. Returns ``None``
+    Priority: the <answer> block, then a \\boxed{} expression. Returns None
     when neither is present, so that callers can distinguish "no answer" from "wrong answer".
     """
     matches = ANSWER_PATTERN.findall(text)
     if matches:
-        # The *last* block: models sometimes echo the format instructions before answering.
+        # The last block: models sometimes echo the format instructions before answering.
         return matches[-1].strip()
     boxed = BOXED_PATTERN.findall(text)
     if boxed:
@@ -70,12 +71,13 @@ def extract_answer(text: str) -> str | None:
     return None
 
 def _parse_raw_number(raw: str) -> str:
-    """Turn a matched number token into a dot-decimal string, understanding the decimal comma.
+    """
+    Turn a matched number token into a dot-decimal string, understanding the decimal comma.
  
-    ``"243,75"`` -> ``"243.75"`` (Spanish decimal comma) and ``"1,234,567"`` -> ``"1234567"``
+    "243,75" -> "243.75" (Spanish decimal comma) and "1,234,567" -> "1234567"
     (thousands separators). A single comma followed by exactly three digits is read as a
-    thousands separator (``"1,250"`` -> ``"1250"``, the GSM8K convention) unless the integer
-    part is 0 (``"0,125"`` -> ``"0.125"``). If the token also has a dot (``"1,234.50"``), the
+    thousands separator ("1,250" -> "1250", the GSM8K convention) unless the integer
+    part is 0 ("0,125" -> "0.125"). If the token also has a dot ("1,234.50"), the
     commas are thousands separators.
     """
     raw = raw.rstrip(",")
@@ -91,10 +93,11 @@ def _parse_raw_number(raw: str) -> str:
     return f"{head}.{tail}"  # 243,75 / 0,125 / 2,5 -> decimal comma
 
 def normalize_number(text: str) -> str | None:
-    """Pull the last number out of a piece of text and normalise it.
+    """
+    Pull the last number out of a piece of text and normalise it.
 
-    ``"The answer is $1,234.50."`` -> ``"1234.5"``; ``"12"`` -> ``"12"``; no number -> ``None``.
-    We take the *last* number because models often restate intermediate values before
+    "The answer is $1,234.50." -> "1234.5"; "12" -> "12"; no number -> None.
+    We take the last number because models often restate intermediate values before
     committing to a final one.
     """
     numbers = NUMBER_PATTERN.findall(text.replace("$", ""))
@@ -140,7 +143,8 @@ UNIT_ALIASES = {
 
 
 def normalize_unit(unit: str) -> str | None:
-    """Return the canonical representation of a unit.
+    """
+    Return the canonical representation of a unit.
 
     Examples:
         "ml" -> "mL"
@@ -160,7 +164,8 @@ def normalize_unit(unit: str) -> str | None:
 
 
 def extract_final_unit(text: str) -> str | None:
-    """Extract the unit associated with the final numerical answer.
+    """
+    Extract the unit associated with the final numerical answer.
 
     The function looks near the last number in the extracted answer, rather
     than searching the whole reasoning trace. This prevents intermediate
@@ -193,7 +198,7 @@ def extract_final_unit(text: str) -> str | None:
 
 
 def units_equivalent(answer_text: str, expected_unit: str, aliases=()) -> bool:
-    """True when the unit written next to the last number of ``answer_text`` is the expected one."""
+    """True when the unit written next to the last number of answer_text is the expected one."""
     predicted = extract_final_unit(answer_text)
     if predicted is None:
         return False
@@ -225,9 +230,10 @@ def format_reward(prompts: Sequence, completions: Sequence, **kwargs) -> list[fl
 def accuracy_reward(
     prompts: Sequence, completions: Sequence, answer: Sequence[str], **kwargs
 ) -> list[float]:
-    """1.0 if the extracted final answer matches the ground truth numerically, else 0.0.
+    """
+    1.0 if the extracted final answer matches the ground truth numerically, else 0.0.
 
-    ``answer`` is the dataset column holding the ground truth (one per completion).
+    answer is the dataset column holding the ground truth (one per completion).
     """
     rewards = []
     for completion, expected in zip(completions, answer, strict=True):
@@ -237,7 +243,7 @@ def accuracy_reward(
 
 
 def thinking_length(text: str) -> int:
-    """Number of whitespace-separated tokens inside the ``<think>`` block (0 if absent)."""
+    """Number of whitespace-separated tokens inside the <think> block (0 if absent)."""
     match = FORMAT_PATTERN.match(text)
     if match is None:
         match = re.search(r"<think>(?P<think>.*?)</think>", text, re.DOTALL)
