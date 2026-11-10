@@ -1,31 +1,31 @@
 """Data indexing, step 2: chunking.
 
 Two strategies, both aware of the Markdown structure of the corpus (one file per medicine,
-one ``##`` section per data-sheet section):
+one ## section per data-sheet section):
 
-* ``recursive_chunks``: split by paragraphs, then lines, then sentences... until every chunk
-  fits ``chunk_size``. It is the default of most RAG systems.
-* ``semantic_chunks``: embed every sentence and start a new chunk where the meaning changes
+* recursive_chunks: split by paragraphs, then lines, then sentences... until every chunk
+  fits chunk_size. It is the default of most RAG systems.
+* semantic_chunks: embed every sentence and start a new chunk where the meaning changes
   (cosine distance between consecutive sentences above a threshold).
 
 Two options apply to both, so that the comparison is fair and so that each one can be
 switched off for an ablation:
 
-* ``by_section``: never let a chunk cross a Markdown heading. Without it a chunk can mix the
+* by_section: never let a chunk cross a Markdown heading. Without it a chunk can mix the
   end of one section ("6.3 Periodo de validez") with the start of the next one.
-* ``add_headers``: prepend the heading of the section (``MEDICAMENTO — 4.2 Posología``) to
+* add_headers: prepend the heading of the section (MEDICAMENTO — 4.2 Posología) to
   every chunk. A chunk from the middle of a section does not say which medicine it talks
   about, and neither BM25 nor the embedding model can guess it; the header fixes that. The
   original text stays contiguous inside the chunk, so a verbatim passage copied from the
   corpus is still found by plain substring search.
 
-Compare both strategies with ``rag/evaluate.py`` (number of chunks, average length and
+Compare both strategies with rag/evaluate.py (number of chunks, average length and
 Recall@k on your gold set). To choose the semantic threshold, run::
 
     uv run python -m rag.chunking --doc ceftriaxona --sweep 0.15 0.2 0.25 0.3 0.4
 
 which prints the distribution of distances, the chunks each threshold produces, and saves
-the plot of distances for one document (``reports/chunking_distances.png``).
+the plot of distances for one document (reports/chunking_distances.png).
 """
 
 from __future__ import annotations
@@ -59,17 +59,17 @@ class Chunk:
     source: str
     text: str
     index: int  # position of the chunk within its document
-    heading: str = ""  # section the chunk comes from (already prepended to ``text`` if used)
+    heading: str = ""  # section the chunk comes from (already prepended to text if used)
 
 
 # ------------------------------------------------------------------------------ structure
 
 
 def split_sections(text: str) -> list[tuple[str, str]]:
-    """Split a Markdown text into ``(heading, body)`` pairs, in order.
+    """Split a Markdown text into (heading, body) pairs, in order.
 
     The text before the first heading is returned with an empty heading. Sections without
-    body are dropped. Bodies are exact substrings of ``text`` (stripped).
+    body are dropped. Bodies are exact substrings of text (stripped).
     """
     heading = ""
     lines: list[str] = []
@@ -119,9 +119,9 @@ def recursive_chunks(
     by_section: bool = True,
     add_headers: bool = True,
 ) -> list[Chunk]:
-    """Split by paragraphs, then lines, then sentences... until every chunk fits ``chunk_size``.
+    """Split by paragraphs, then lines, then sentences... until every chunk fits chunk_size.
 
-    ``separators`` are regular expressions tried in order. ``chunk_size`` counts the header
+    separators are regular expressions tried in order. chunk_size counts the header
     too (when there is one, the body gets what is left).
     """
     from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -165,7 +165,7 @@ def _trim(text: str, start: int, end: int) -> tuple[int, int]:
 
 
 def _hard_split(text: str, start: int, end: int, max_chars: int) -> list[tuple[int, int]]:
-    """Cut a span longer than ``max_chars`` on spaces (a table row, a list without stops)."""
+    """Cut a span longer than max_chars on spaces (a table row, a list without stops)."""
     spans = []
     while end - start > max_chars:
         cut = text.rfind(" ", start + 1, start + max_chars + 1)
@@ -180,7 +180,7 @@ def _hard_split(text: str, start: int, end: int, max_chars: int) -> list[tuple[i
 
 
 def _sentence_spans(text: str, max_chars: int | None = None) -> list[tuple[int, int]]:
-    """``(start, end)`` offsets of every sentence. Each line break is also a boundary."""
+    """(start, end) offsets of every sentence. Each line break is also a boundary."""
     raw: list[tuple[int, int]] = []
     for line in re.finditer(r"[^\n]+", text):
         position = line.start()
@@ -203,7 +203,7 @@ def _sentence_spans(text: str, max_chars: int | None = None) -> list[tuple[int, 
 def split_sentences(text: str) -> list[str]:
     """Sentence splitter for Spanish data-sheet text; every line break is a boundary too.
 
-    It only cuts after ``. ! ?`` when a capital letter follows, so abbreviations written in
+    It only cuts after . ! ? when a capital letter follows, so abbreviations written in
     lower case ("p. ej.", "máx. 5 mg") and decimals ("0,9 %") do not split a sentence.
     """
     return [text[a:b] for a, b in _sentence_spans(text)]
@@ -213,7 +213,7 @@ def split_sentences(text: str) -> list[str]:
 
 
 def cached_embed(embed_fn: EmbedFn) -> EmbedFn:
-    """Wrap ``embed_fn`` so every distinct text is embedded only once.
+    """Wrap embed_fn so every distinct text is embedded only once.
 
     Useful when sweeping the threshold: the sentences are the same, only the cuts change.
     """
@@ -234,7 +234,7 @@ def cached_embed(embed_fn: EmbedFn) -> EmbedFn:
 
 
 def sentence_distances(sentences: list[str], embed_fn: EmbedFn) -> np.ndarray:
-    """Cosine distance ``1 - e_i · e_{i+1}`` between consecutive sentences (length n - 1)."""
+    """Cosine distance 1 - e_i · e_{i+1} between consecutive sentences (length n - 1)."""
     if len(sentences) < 2:
         return np.zeros(0, dtype=np.float32)
     return _consecutive_distances(np.asarray(embed_fn(sentences), dtype=np.float32))
@@ -326,8 +326,8 @@ def semantic_chunks(
 ) -> list[Chunk]:
     """Group consecutive sentences while their embeddings stay close.
 
-    ``embed_fn(list[str]) -> array of shape (n, d)`` with L2-normalised rows (see
-    ``rag/embed.py``). The algorithm from the slides, applied inside each section:
+    embed_fn(list[str]) -> array of shape (n, d) with L2-normalised rows (see
+    rag/embed.py). The algorithm from the slides, applied inside each section:
 
     1. Split the section into sentences s_1 … s_n.
     2. Embed them: e_1 … e_n (one call for the whole corpus).
@@ -335,21 +335,21 @@ def semantic_chunks(
     4. For each consecutive pair, compute the cosine distance 1 - e_i · e_{i+1}.
     5. If the distance is <= threshold, append s_{i+1} to the current chunk.
     6. Otherwise close the chunk and start a new one at s_{i+1}.
-    7. Also close a chunk when it would exceed ``max_chunk_chars`` (header included).
+    7. Also close a chunk when it would exceed max_chunk_chars (header included).
 
     Extras, off by default so that the base algorithm stays the one from class:
 
-    * ``min_chunk_chars``: merge a chunk shorter than this into its neighbour when the result
-      still fits ``max_chunk_chars``.
-    * ``percentile``: instead of a fixed threshold, use that percentile of all the distances
+    * min_chunk_chars: merge a chunk shorter than this into its neighbour when the result
+      still fits max_chunk_chars.
+    * percentile: instead of a fixed threshold, use that percentile of all the distances
       of the corpus (e.g. 80 cuts at the 20 % largest jumps). It does not depend on the scale
       of the embedding model.
 
     Chunk text is copied verbatim from the document (line breaks included), so a passage
     copied from the corpus can be found inside a chunk by substring search.
 
-    Plot the distances for one document with the threshold line (``plot_distances`` or
-    ``python -m rag.chunking``) and include it in your report: it is the best way to justify
+    Plot the distances for one document with the threshold line (plot_distances or
+    python -m rag.chunking) and include it in your report: it is the best way to justify
     the threshold you chose.
     """
     sections = _prepare(documents, max_chunk_chars, by_section, add_headers)

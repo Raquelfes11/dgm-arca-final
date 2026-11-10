@@ -1,9 +1,9 @@
 """Tests for unit handling in rlm/rewards.py and MedicationVerifier.
 
-The OOD split asks for ``mcg/kg/min`` (continuous infusion). Until this was supported,
-``normalize_unit("mcg/kg/min")`` was ``None`` and every answer in that unit was rejected,
+The OOD split asks for mcg/kg/min (continuous infusion). Until this was supported,
+normalize_unit("mcg/kg/min") was None and every answer in that unit was rejected,
 right or wrong. The last block pins down that the units of the original families
-(``mL``, ``mL/h``, ``mg``, ``gotas/min``) behave exactly as before.
+(mL, mL/h, mg, gotas/min) behave exactly as before.
 """
 
 from __future__ import annotations

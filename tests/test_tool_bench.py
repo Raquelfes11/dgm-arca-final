@@ -483,7 +483,7 @@ def test_apply_adapter_wraps_the_base_model_and_warns_on_a_different_base(monkey
         def eval(self):
             return self
 
-    # A stand-in for ``peft``: the test needs neither the library nor a model.
+    # A stand-in for peft: the test needs neither the library nor a model.
     fake_peft = SimpleNamespace(
         PeftConfig=SimpleNamespace(
             from_pretrained=lambda path: SimpleNamespace(base_model_name_or_path="Qwen/Qwen3-1.7B")

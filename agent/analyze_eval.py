@@ -1,20 +1,21 @@
-"""Read ``reports/phase4_eval.json`` and explain *why* each brain fails, not only how often.
+"""Read reports/phase4_eval.json and explain why each brain fails, not only how often.
 
     uv run python -m agent.analyze_eval
-    uv run python -m agent.analyze_eval --report reports/phase4_eval.json --markdown reports/phase4_analysis.md
+    uv run python -m agent.analyze_eval --report reports/phase4_eval.json \\
+        --markdown reports/phase4_analysis.md
 
-The success rate of ``agent/evaluate.py`` is one number per brain. When it is low it does not
+The success rate of agent/evaluate.py is one number per brain. When it is low it does not
 say whether the model reasons badly, never calls a tool, writes calls the parser cannot read,
 or stops with an empty answer. This script adds, per brain:
 
-* the success rate on the core tasks, and the *faithful* success rate (correct **and** all the
-  ``required_tools`` used: a right answer written from memory does not count);
+* the success rate on the core tasks, and the faithful success rate (correct and all the
+  required_tools used: a right answer written from memory does not count);
 * how many steps had no valid tool call, how many runs ended with an empty answer and how
   often the knowledge base was used on the tasks that need it;
-* every failed core task in exactly one class (``FAILURE_CLASSES``), first match wins;
+* every failed core task in exactly one class (FAILURE_CLASSES), first match wins;
 * a task by brain grid, so single tasks can be compared.
 
-Brains that were skipped (their entry has an ``error``) are listed and left out of the tables.
+Brains that were skipped (their entry has an error) are listed and left out of the tables.
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ FAILURE_CLASSES = {
 
 
 def classify_failure(row: dict) -> str | None:
-    """Class of a failed run (see ``FAILURE_CLASSES``), or ``None`` if the run was correct."""
+    """Class of a failed run (see FAILURE_CLASSES), or None if the run was correct."""
     if row["correct"]:
         return None
     if not row["succeeded"]:
@@ -81,7 +82,7 @@ def analyse_brain(rows: list[dict]) -> dict:
 
 
 def analyse(results: dict) -> dict:
-    """``{brain: metrics}`` for every brain that ran, plus the names of those that did not."""
+    """{brain: metrics} for every brain that ran, plus the names of those that did not."""
     done = {b: r for b, r in results.items() if "error" not in r and r.get("rows")}
     return {
         "brains": {brain: analyse_brain(r["rows"]) for brain, r in done.items()},
@@ -91,7 +92,7 @@ def analyse(results: dict) -> dict:
 
 
 def _grid(results: dict) -> dict[str, dict[str, str]]:
-    """``{task id: {brain: "OK" | "fallo"}}``."""
+    """{task id: {brain: "OK" | "fallo"}}."""
     grid: dict[str, dict[str, str]] = {}
     for brain, result in results.items():
         for row in result["rows"]:

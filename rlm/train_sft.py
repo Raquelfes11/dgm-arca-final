@@ -1,39 +1,39 @@
 """Phase 1, step 3: cold-start supervised fine-tuning on verified reasoning traces.
 
 This is the "SFT round 1" box of the DeepSeek pipeline. The input is the JSONL produced
-by ``rlm/distill.py``: problems from your domain with a teacher-generated reasoning trace
-that *passed your verifier*. The output is a LoRA adapter that already speaks the
-``<think>…</think><answer>…</answer>`` format before we ever run GRPO.
+by rlm/distill.py: problems from your domain with a teacher-generated reasoning trace
+that passed your verifier. The output is a LoRA adapter that already speaks the
+<think>…</think><answer>…</answer> format before we ever run GRPO.
 
 Run::
 
     uv run python -m rlm.train_sft --data rlm/data/sft_traces.jsonl --output rlm/weights/sft_lora
 
-What is decided for you: the trainer (``trl.SFTTrainer``), LoRA, the conversational
-format (``prompt`` + ``completion`` columns, so that the loss is computed only on the
+What is decided for you: the trainer (trl.SFTTrainer), LoRA, the conversational
+format (prompt + completion columns, so that the loss is computed only on the
 assistant turn). What we decided, and why (also written in docs/EXPERIMENTS.md):
 
-* **Base model, Qwen3-0.6B.** The student is the model that GRPO will later train, and it has
+* Base model, Qwen3-0.6B. The student is the model that GRPO will later train, and it has
   to fit with its optimizer state, activations and the 151k-token logits in a 16 GiB MIG slice.
   The teacher (Qwen3-4B) is the same family, so the student already knows the chat template and
-  the ``<think>`` token.
-* **LoRA r=16 on every linear layer (alpha 32).** A cold start only has to teach a *format and
-  a style* (short Spanish reasoning, then ``<answer>value unit</answer>``), not new
+  the <think> token.
+* LoRA r=16 on every linear layer (alpha 32). A cold start only has to teach a format and
+  a style (short Spanish reasoning, then <answer>value unit</answer>), not new
   knowledge, so a low-rank adapter is enough and it cannot wipe out what the model knows.
-* **Learning rate 2e-4.** The usual range for LoRA is 1e-4 to 3e-4 (it is ~10x higher than
+* Learning rate 2e-4. The usual range for LoRA is 1e-4 to 3e-4 (it is ~10x higher than
   full fine-tuning because only the adapter learns); 2e-4 with a cosine decay is the
   middle of it.
-* **3 epochs, best epoch kept.** With ~1,500 traces and an effective batch of 16 there are
+* 3 epochs, best epoch kept. With ~1,500 traces and an effective batch of 16 there are
   ~90 optimizer steps per epoch. Two epochs would leave the format half learned; many more would
   start memorising the 800 training problems (each appears with two traces). A small
-  evaluation split, held out *by problem*, is scored after every epoch and the epoch with the
+  evaluation split, held out by problem, is scored after every epoch and the epoch with the
   lowest evaluation loss is the adapter that gets saved.
-* **Maximum length 1536 tokens.** The teacher was limited to 1,200 new tokens and the prompt
+* Maximum length 1536 tokens. The teacher was limited to 1,200 new tokens and the prompt
   (system prompt plus statement) takes ~250, so every example fits. Examples that do not fit are
-  dropped (never truncated: a truncated trace loses its ``</think><answer>`` ending and would
+  dropped (never truncated: a truncated trace loses its </think><answer> ending and would
   teach the model not to finish). The script prints the real length distribution so that
   the choice can be checked against the data.
-* **Batch 2 x 8 accumulation steps.** Effective batch of 16 sequences; the small per-device
+* Batch 2 x 8 accumulation steps. Effective batch of 16 sequences; the small per-device
   batch keeps the 151k-vocabulary logits inside 16 GiB.
 """
 
@@ -54,7 +54,7 @@ WARMUP_FRACTION = 0.05  # share of the optimizer steps spent ramping the learnin
 
 
 def load_verified_traces(path: str | Path) -> Dataset:
-    """Read the distilled JSONL keeping every column and only the traces marked ``verified``."""
+    """Read the distilled JSONL keeping every column and only the traces marked verified."""
     dataset = load_dataset("json", data_files=str(path), split="train")
     if "verified" in dataset.column_names:
         dataset = dataset.filter(lambda ex: bool(ex["verified"]))
@@ -64,9 +64,9 @@ def load_verified_traces(path: str | Path) -> Dataset:
 def to_prompt_completion(dataset: Dataset) -> Dataset:
     """Turn distilled traces into TRL's prompt/completion conversational format.
 
-    Expected fields: ``question`` and ``trace`` (the full ``<think>…</think><answer>…</answer>``
-    text). The prompt is the same one used at inference (``rlm.data.build_prompt``), so the
-    student is trained on exactly what it will see later, without the Spanish hint that the
+    Expected fields: question and trace (the full <think>…</think><answer>…</answer> text).
+    The prompt is the same one used at inference (rlm.data.build_prompt), so the student is
+    trained on exactly what it will see later, without the Spanish hint that the
     teacher needed.
     """
     return dataset.map(
@@ -90,8 +90,8 @@ def split_by_problem(
 
     Every problem has several traces with the same statement, so splitting by row would leak:
     a trace in the evaluation set would have its twin in the training set. The split is
-    therefore made on the ``id`` column written by ``rlm.distill``. Without that column, or with
-    ``eval_fraction <= 0``, there is no evaluation set.
+    therefore made on the id column written by rlm.distill. Without that column, or with
+    eval_fraction <= 0, there is no evaluation set.
     """
     if eval_fraction <= 0 or "id" not in dataset.column_names:
         return dataset, None
@@ -125,7 +125,7 @@ def length_report(lengths: Sequence[int]) -> dict:
 
 
 def drop_overlong(dataset: Dataset, tokenizer, max_length: int) -> tuple[Dataset, dict]:
-    """Remove examples longer than ``max_length`` tokens instead of letting the trainer cut them.
+    """Remove examples longer than max_length tokens instead of letting the trainer cut them.
 
     Returns the filtered dataset and the length report (with the number of dropped examples).
     """

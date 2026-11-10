@@ -1,30 +1,30 @@
 """Phase 1, out-of-distribution test: how much do SFT and GRPO degrade on new problems?
 
-``rlm.evaluate`` scores every model on ``rlm/data/test.jsonl`` (same families as train) and,
-run with ``--data rlm/data/test_ood.jsonl --out reports/phase1_eval_ood.json``, on the OOD set
+rlm.evaluate scores every model on rlm/data/test.jsonl (same families as train) and,
+run with --data rlm/data/test_ood.jsonl --out reports/phase1_eval_ood.json, on the OOD set
 (a family that never appears in train). This script reads both result files and answers:
-*does the pass@1 of each model drop on the OOD set, and does it drop differently for SFT than
-for GRPO?* It needs no GPU and no dataset, only the two JSON files.
+does the pass@1 of each model drop on the OOD set, and does it drop differently for SFT than
+for GRPO? It needs no GPU and no dataset, only the two JSON files.
 
 Run::
 
     uv run python -m rlm.compare_ood --models sft grpo_sin_kl
 
-and it writes ``reports/ood_comparison.md`` (tables ready to paste in docs/EXPERIMENTS.md).
+and it writes reports/ood_comparison.md (tables ready to paste in docs/EXPERIMENTS.md).
 
-If the verifier has changed since ``rlm.evaluate`` ran (for example it learned a new unit), add
-``--rescore``: every stored generation is scored again with the current verifier, with no GPU
+If the verifier has changed since rlm.evaluate ran (for example it learned a new unit), add
+--rescore: every stored generation is scored again with the current verifier, with no GPU
 and nothing generated, and the report says how many verdicts changed.
 
 Statistics, kept deliberately simple because each set has only 100-200 problems:
 
-* **pass@1 interval**: Wilson score interval at 95 %. It behaves well for proportions close
-  to 0 or 1, where the usual ``p +- 1.96 * sqrt(p(1-p)/n)`` interval goes outside [0, 1].
-* **Drop** = pass@1(test) - pass@1(OOD), so a positive number means the model got worse. Its
+* pass@1 interval: Wilson score interval at 95 %. It behaves well for proportions close
+  to 0 or 1, where the usual p +- 1.96 * sqrt(p(1-p)/n) interval goes outside [0, 1].
+* Drop = pass@1(test) - pass@1(OOD), so a positive number means the model got worse. Its
   95 % interval is Newcombe's, built from the two Wilson intervals (the two sets contain
   different problems, so the samples are independent). If the interval contains 0 the drop
   cannot be told apart from noise with this many problems.
-* **SFT vs GRPO on the same set** are scored on the *same* problems, so the comparison is
+* SFT vs GRPO on the same set are scored on the same problems, so the comparison is
   paired: we count the problems that only one of the two solves and run an exact two-sided
   sign test on them (McNemar's exact test). It is much more sensitive than comparing two
   separate intervals.
@@ -45,7 +45,7 @@ from pathlib import Path
 Row = dict
 ValueMatches = Callable[[Row], bool]
 
-# Result kinds, same names as ``rlm/analyze_eval.py`` uses for the test set.
+# Result kinds, same names as rlm/analyze_eval.py uses for the test set.
 KINDS = ("ok", "valor_ok_unidad_mal", "valor_mal", "sin_answer")
 
 
@@ -63,7 +63,7 @@ def wilson_interval(successes: int, n: int, z: float = 1.96) -> tuple[float, flo
 def newcombe_difference(
     k1: int, n1: int, k2: int, n2: int, z: float = 1.96
 ) -> tuple[float, float, float]:
-    """Difference ``k1/n1 - k2/n2`` of two independent proportions with Newcombe's interval."""
+    """Difference k1/n1 - k2/n2 of two independent proportions with Newcombe's interval."""
     p1, p2 = k1 / n1, k2 / n2
     low1, up1 = wilson_interval(k1, n1, z)
     low2, up2 = wilson_interval(k2, n2, z)
@@ -125,7 +125,7 @@ def summarize(rows: Sequence[Row], value_matches: ValueMatches) -> dict:
 
 
 def paired_counts(rows_a: Sequence[Row], rows_b: Sequence[Row]) -> dict:
-    """Compare two models on the same problems (``rlm.evaluate`` keeps the dataset order)."""
+    """Compare two models on the same problems (rlm.evaluate keeps the dataset order)."""
     if len(rows_a) != len(rows_b) or any(
         a["question"] != b["question"] for a, b in zip(rows_a, rows_b, strict=True)
     ):
@@ -150,7 +150,7 @@ def paired_counts(rows_a: Sequence[Row], rows_b: Sequence[Row]) -> dict:
 
 
 def compare(test: dict, ood: dict, models: Sequence[str], value_matches: ValueMatches) -> dict:
-    """Everything the report needs, from the two ``rlm.evaluate`` result dictionaries."""
+    """Everything the report needs, from the two rlm.evaluate result dictionaries."""
     missing = [m for m in models if m not in test or m not in ood]
     if missing:
         raise KeyError(
@@ -195,7 +195,7 @@ def points(x: float) -> str:
 
 
 def family_cell(counts: dict | None) -> str:
-    """``correct/n (xx,x %)`` for one family, or ``-`` when the model has no such family."""
+    """correct/n (xx,x %) for one family, or - when the model has no such family."""
     if not counts:
         return "-"
     return f"{counts['correct']}/{counts['n']} ({pct(counts['correct'] / counts['n'])})"
@@ -307,9 +307,9 @@ def load_results(path: str | Path) -> dict:
 def rescore_rows(rows: Sequence[Row], lookup: dict, verify: Callable) -> list[Row]:
     """Score the stored generations again with the current verifier (nothing is generated).
 
-    ``lookup`` maps the question to ``(answer_unit, answer_unit_aliases)`` and ``verify`` has
-    the signature of ``MedicationVerifier.verify``. The previous verdict is kept in
-    ``is_correct_original`` so that the report can say what the new verifier changed.
+    lookup maps the question to (answer_unit, answer_unit_aliases) and verify has
+    the signature of MedicationVerifier.verify. The previous verdict is kept in
+    is_correct_original so that the report can say what the new verifier changed.
     """
     rescored = []
     for row in rows:
@@ -329,7 +329,7 @@ def rescore_rows(rows: Sequence[Row], lookup: dict, verify: Callable) -> list[Ro
 
 
 def rescore_results(results: dict, lookup: dict, verify: Callable, models: Sequence[str]) -> dict:
-    """``rescore_rows`` for every requested model of an ``rlm.evaluate`` result file."""
+    """rescore_rows for every requested model of an rlm.evaluate result file."""
     return {
         model: {**results[model], "rows": rescore_rows(results[model]["rows"], lookup, verify)}
         for model in models
@@ -338,7 +338,7 @@ def rescore_results(results: dict, lookup: dict, verify: Callable, models: Seque
 
 
 def build_lookup(path: str | Path) -> dict:
-    """question -> (answer_unit, answer_unit_aliases), read like ``rlm.evaluate`` reads it."""
+    """question -> (answer_unit, answer_unit_aliases), read like rlm.evaluate reads it."""
     from rlm.data import load_domain_dataset
 
     return {

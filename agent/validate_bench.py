@@ -3,17 +3,17 @@
     uv run python -m agent.validate_bench                   # structure, arithmetic, evidence
     uv run python -m agent.validate_bench --retrieval       # also: does the retriever find it?
 
-The benchmark (``agent/bench/tasks.jsonl``) is only worth as much as its answers, so this
+The benchmark (agent/bench/tasks.jsonl) is only worth as much as its answers, so this
 script checks that:
 
-* every task has the fields ``agent/evaluate.py`` needs, a well-formed ``check``, unique ids
+* every task has the fields agent/evaluate.py needs, a well-formed check, unique ids
   and, for the core tasks, at least two different tools;
-* the arithmetic written in ``answer_exprs`` gives the value the ``check`` expects (the number
+* the arithmetic written in answer_exprs gives the value the check expects (the number
   in the check is not typed by hand and forgotten);
-* every ``evidence`` passage is still in the corpus. CIMA updates its data sheets, so this is
-  the check that tells you a task has gone stale after ``rag.download_corpus`` is run again;
-* with ``--retrieval``: whether the phase-3 retriever (the one behind ``search_knowledge_base``)
-  brings that passage in its top ``k`` for the task text. It separates tasks the agent cannot
+* every evidence passage is still in the corpus. CIMA updates its data sheets, so this is
+  the check that tells you a task has gone stale after rag.download_corpus is run again;
+* with --retrieval: whether the phase-3 retriever (the one behind search_knowledge_base)
+  brings that passage in its top k for the task text. It separates tasks the agent cannot
   solve because the passage never reaches it from tasks it solves badly.
 """
 
@@ -48,7 +48,7 @@ def known_tools() -> set[str]:
 
 
 def evaluate_expression(expression: str) -> float:
-    """Evaluate plain arithmetic (numbers, + - * / ** and parentheses) without ``eval``."""
+    """Evaluate plain arithmetic (numbers, + - * / ** and parentheses) without eval."""
 
     def walk(node: ast.AST) -> float:
         if isinstance(node, ast.Constant) and isinstance(node.value, int | float):
@@ -73,7 +73,7 @@ def evaluate_expression(expression: str) -> float:
 
 
 def _flatten(check: dict) -> list[dict]:
-    """The leaf checks of a check (``all``/``any`` are expanded), in order."""
+    """The leaf checks of a check (all/any are expanded), in order."""
     if check.get("type") in ("all", "any"):
         return [leaf for sub in check.get("checks", []) for leaf in _flatten(sub)]
     return [check]
@@ -115,7 +115,7 @@ def validate(
 ) -> list[str]:
     """Problems found in the benchmark, as readable lines (empty list = all good).
 
-    ``corpus_dir=None`` skips the evidence check and ``tools=None`` the tool names.
+    corpus_dir=None skips the evidence check and tools=None the tool names.
     """
     problems: list[str] = []
     ids = [t.get("id") for t in tasks]
@@ -164,7 +164,7 @@ def validate(
 
 
 def retrieval_report(tasks: list[dict], k: int) -> list[tuple[str, int, int]]:
-    """For each task with evidence: how many passages the retriever brings in its top ``k``."""
+    """For each task with evidence: how many passages the retriever brings in its top k."""
     from agent.react_agent import _get_retriever
 
     retriever = _get_retriever()
