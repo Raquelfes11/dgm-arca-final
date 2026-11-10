@@ -3,19 +3,19 @@
 This is what Sky-T1, OpenThoughts and DeepSeek's cold start have in common: a strong model
 writes solutions with visible reasoning, a verifier throws away the wrong ones, and what
 survives becomes SFT data. Here the teacher is Qwen3-4B in thinking mode and the student
-(``rlm/train_sft.py``) is Qwen3-0.6B.
+(rlm/train_sft.py) is Qwen3-0.6B.
 
 The pipeline has two separate stages so that the expensive one never has to be repeated:
 
-1. **Generation** (needs the GPU). For every problem the teacher writes ``--samples``
-   solutions. Every raw generation is appended to ``--raw-output`` (a JSONL under
-   ``outputs/``, git-ignored) *as soon as its batch is finished*. If the DGX session dies,
+1. Generation (needs the GPU). For every problem the teacher writes --samples
+   solutions. Every raw generation is appended to --raw-output (a JSONL under
+   outputs/, git-ignored) as soon as its batch is finished. If the DGX session dies,
    re-running the same command resumes where it stopped.
-2. **Filtering** (CPU only, seconds). Each raw generation is turned into the canonical
-   ``<think>…</think><answer>…</answer>`` text, judged by the ``MedicationVerifier`` (value
-   *and* unit) plus a few quality filters, and given exactly one verdict (``accepted`` or a
-   rejection reason). Verified traces are written to ``--output``, the small file that
-   ``rlm.train_sft`` reads and that is committed to git. ``--filter-only`` runs just this
+2. Filtering (CPU only, seconds). Each raw generation is turned into the canonical
+   <think>…</think><answer>…</answer> text, judged by the MedicationVerifier (value
+   and unit) plus a few quality filters, and given exactly one verdict (accepted or a
+   rejection reason). Verified traces are written to --output, the small file that
+   rlm.train_sft reads and that is committed to git. --filter-only runs just this
    stage, so you can change a threshold without generating anything again.
 
 Run (pilot first, then the full run; see docs/EXPERIMENTS.md for the numbers)::
@@ -28,18 +28,18 @@ Run (pilot first, then the full run; see docs/EXPERIMENTS.md for the numbers)::
 
 Design decisions (the ones to defend orally):
 
-* **Teacher sampling**: temperature 0.6, top-p 0.95, top-k 20, never greedy. These are the
+* Teacher sampling: temperature 0.6, top-p 0.95, top-k 20, never greedy. These are the
   values the Qwen3 model card prescribes for thinking mode; greedy decoding makes the
-  model loop and, with ``--samples`` > 1, would give the same trace four times.
-* **Spanish**: the statements are in Spanish, so the teacher is asked to reason in Spanish
+  model loop and, with --samples > 1, would give the same trace four times.
+* Spanish: the statements are in Spanish, so the teacher is asked to reason in Spanish
   and traces that are not mostly Spanish are discarded. Asking is not enough (Qwen3 keeps
-  thinking in English), so its reasoning is also *started* in Spanish with a short prefill
-  sentence (``THINK_PREFILL``). The student learns to reason in the language of its users.
-* **Canonical format**: Qwen3 writes its reasoning, then ``</think>``, then an answer text.
-  We keep only the reasoning and the content of the final ``<answer>`` block, so every
+  thinking in English), so its reasoning is also started in Spanish with a short prefill
+  sentence (THINK_PREFILL). The student learns to reason in the language of its users.
+* Canonical format: Qwen3 writes its reasoning, then </think>, then an answer text.
+  We keep only the reasoning and the content of the final <answer> block, so every
   training example has exactly the structure that the format reward of GRPO will check.
-* **Unit-aware verification**: a right number in the wrong unit is rejected (``mg`` instead
-  of ``mcg``, ``mL`` instead of ``mL/h``). In nursing that is a different dose.
+* Unit-aware verification: a right number in the wrong unit is rejected (mg instead
+  of mcg, mL instead of mL/h). In nursing that is a different dose.
 """
 
 from __future__ import annotations
@@ -57,15 +57,14 @@ from rlm.data import R1_ZERO_SYSTEM_PROMPT
 from rlm.rewards import extract_answer, has_valid_format
 from rlm.verifier import MedicationVerifier
 
-# --------------------------------------------------------------------------------------
+
 # Constants
-# --------------------------------------------------------------------------------------
 
 # Sampling recommended by the Qwen3-4B model card for thinking mode (never greedy).
 TEACHER_SAMPLING = {"temperature": 0.6, "top_p": 0.95, "top_k": 20}
 
-# Added to the end of the question *only for the teacher*. The student is trained with the
-# plain question and the usual system prompt (``rlm.data.build_prompt``), so after SFT it
+# Added to the end of the question only for the teacher. The student is trained with the
+# plain question and the usual system prompt (rlm.data.build_prompt), so after SFT it
 # reasons in Spanish without needing this hint.
 SPANISH_HINT = (
     "\n\nRazona paso a paso en español, escribiendo las unidades en cada paso. "
@@ -73,11 +72,11 @@ SPANISH_HINT = (
     "<answer>12,5 mL/h</answer>), con el redondeo que pida el enunciado."
 )
 
-# Qwen3 thinks in English even when the question and the instructions are in Spanish (seen in
-# the pilot: correct answers, English reasoning). The hint above is not enough, so the
-# teacher's reasoning is *started for it* in Spanish: the prompt ends with an open ``<think>``
-# block and this opening sentence, and the model continues from there. The sentence is kept
-# as the first words of the trace, so the student sees it too. ``--no-prefill`` disables it.
+# Qwen3 thinks in English even when the question and the instructions are in Spanish. The 
+# hint above is not enough, so the teacher's reasoning is *started for it* in Spanish: the 
+# prompt ends with an open <think> block and this opening sentence, and the model continues 
+# from there. The sentence is kept as the first words of the trace, so the student sees it
+# too. --no-prefill disables it.
 THINK_PREFILL = "<think>\nVale, voy a resolverlo paso a paso."
 
 # Reasons a generation can be rejected, in the order they are checked.
@@ -118,10 +117,7 @@ WORD_PATTERN = re.compile(r"[a-záéíóúüñ]+")
 ANSWER_TAG_PATTERN = re.compile(r"</?answer>")
 
 
-# --------------------------------------------------------------------------------------
 # Problems
-# --------------------------------------------------------------------------------------
-
 
 def load_problems(path: str | Path) -> list[dict]:
     """Read the domain JSONL keeping every column (the verifier needs the unit fields)."""
@@ -139,7 +135,7 @@ def load_problems(path: str | Path) -> list[dict]:
 
 
 def problem_level(problem: dict) -> str:
-    """Difficulty level (``"1"``/``"2"``/``"3"``) stored inside the ``branches`` JSON string."""
+    """Difficulty level ("1"/"2"/"3") stored inside the branches JSON string."""
     branches = problem.get("branches")
     if isinstance(branches, str):
         try:
@@ -154,10 +150,11 @@ def problem_level(problem: dict) -> str:
 def select_problems(
     problems: Sequence[dict], per_family: int | None = None, limit: int | None = None, seed: int = 0
 ) -> list[tuple[int, dict]]:
-    """Return ``(id, problem)`` pairs, where ``id`` is the row index in the full file.
+    """
+    Return (id, problem) pairs, where id is the row index in the full file.
 
-    ``per_family`` takes that many random problems of every family (a balanced pilot);
-    ``limit`` truncates the result. The ids refer to the *full* file, so a pilot and the
+    per_family takes that many random problems of every family (a balanced pilot);
+    limit truncates the result. The ids refer to the full file, so a pilot and the
     full run never confuse two different problems.
     """
     indexed = list(enumerate(problems))
@@ -184,18 +181,16 @@ def teacher_messages(question: str) -> list[dict]:
     ]
 
 
-# --------------------------------------------------------------------------------------
 # From raw teacher text to a canonical trace
-# --------------------------------------------------------------------------------------
-
 
 def split_teacher_output(raw: str) -> tuple[str | None, str | None]:
-    """Split Qwen3's output into ``(thinking, final_text)``.
+    """
+    Split Qwen3's output into (thinking, final_text).
 
-    In thinking mode the model writes its reasoning, closes it with ``</think>`` and then
-    writes the visible answer. The opening ``<think>`` may or may not be part of the
+    In thinking mode the model writes its reasoning, closes it with </think> and then
+    writes the visible answer. The opening <think> may or may not be part of the
     decoded text depending on the chat template, so it is stripped if present. Returns
-    ``(None, None)`` when ``</think>`` never appears (the generation was cut off).
+    (None, None) when </think> never appears (the generation was cut off).
     """
     text = raw.strip()
     if text.startswith("<think>"):
@@ -207,15 +202,16 @@ def split_teacher_output(raw: str) -> tuple[str | None, str | None]:
 
 
 def last_answer(final_text: str) -> str | None:
-    """Content of the last ``<answer>`` block of the visible answer, or ``\\boxed{}`` fallback."""
+    """Content of the last <answer> block of the visible answer, or \\boxed{} fallback."""
     return extract_answer(final_text)
 
 
 def clean_answer(answer: str) -> str:
-    """Remove LaTeX leftovers from the content of an ``<answer>`` block.
+    """
+    Remove LaTeX leftovers from the content of an <answer> block.
 
-    The teacher sometimes writes math-mode decimals such as ``20{,}20 mL`` or ``\\text{mL}``.
-    ``normalize_number`` would read ``20{,}20`` as the two numbers 20 and 20 and reject a right
+    The teacher sometimes writes math-mode decimals such as 20{,}20 mL or \\text{mL}.
+    normalize_number would read 20{,}20 as the two numbers 20 and 20 and reject a right
     answer (seen in the pilot), and the student must learn plain text anyway.
     """
     answer = answer.replace("{,}", ",").replace("$", "")
@@ -225,7 +221,8 @@ def clean_answer(answer: str) -> str:
 
 
 def tidy_whitespace(text: str) -> str:
-    """Collapse runs of spaces/tabs into one space (newlines are kept).
+    """
+    Collapse runs of spaces/tabs into one space (newlines are kept).
 
     The first pilot showed double spaces after every full stop (the prefill used to end with a
     space, which the teacher then imitated). They carry no meaning and cost tokens, so they are
@@ -241,9 +238,9 @@ def canonical_trace(thinking: str, answer: str) -> str:
 
 
 def spanish_ratio(text: str) -> tuple[float, int]:
-    """Fraction of Spanish among the recognised stop words of ``text``, and how many there were.
+    """Fraction of Spanish among the recognised stop words of text, and how many there were.
 
-    Returns ``(ratio, n_recognised)``. With very few recognised words the ratio means nothing,
+    Returns (ratio, n_recognised). With very few recognised words the ratio means nothing,
     so callers also look at the count.
     """
     words = WORD_PATTERN.findall(text.lower())
@@ -261,12 +258,13 @@ def judge_generation(
     min_spanish_ratio: float = 0.6,
     max_trace_tokens: int = 1800,
 ) -> dict:
-    """Give one raw generation its verdict. Returns the record plus the judging fields.
+    """
+    Give one raw generation its verdict. Returns the record plus the judging fields.
 
-    Added keys: ``verdict`` (``accepted`` or a rejection reason, see ``REASONS``), ``trace``
-    (canonical text, ``None`` if it could not be built), ``predicted`` and ``detail``.
-    Correctness is checked *before* the quality filters, so the reasons ``too_short``,
-    ``not_spanish`` and ``too_long`` only ever apply to traces that were correct.
+    Added keys: verdict (accepted or a rejection reason, see REASONS), trace
+    (canonical text, None if it could not be built), predicted and detail.
+    Correctness is checked *before* the quality filters, so the reasons too_short,
+    not_spanish and too_long only ever apply to traces that were correct.
     """
     out = dict(record)
     out.update(verdict=REASON_TRUNCATED, trace=None, predicted=None, detail="")
@@ -320,12 +318,13 @@ def judge_generation(
 def select_traces(
     judged: Iterable[dict], keep_per_problem: int = 2, strategy: str = "shortest", seed: int = 0
 ) -> list[dict]:
-    """Keep at most ``keep_per_problem`` accepted traces per problem.
+    """
+    Keep at most keep_per_problem accepted traces per problem.
 
     Several traces per problem give the student diversity, but four copies of the same easy
-    problem would over-weight it. ``shortest`` prefers concise reasoning (a 0.6B model
+    problem would over-weight it. shortest prefers concise reasoning (a 0.6B model
     copies short, clean reasoning better than rambling "wait, let me re-check" loops);
-    ``random`` is the unbiased alternative.
+    random is the unbiased alternative.
     """
     by_problem: dict[int, list[dict]] = defaultdict(list)
     for row in judged:
@@ -344,7 +343,7 @@ def select_traces(
 
 
 def to_sft_row(row: dict) -> dict:
-    """The compact record written to ``rlm/data/sft_traces.jsonl`` (what ``train_sft`` reads)."""
+    """The compact record written to rlm/data/sft_traces.jsonl (what train_sft reads)."""
     return {
         "id": row["id"],
         "question": row["question"],
@@ -358,10 +357,7 @@ def to_sft_row(row: dict) -> dict:
     }
 
 
-# --------------------------------------------------------------------------------------
 # Statistics for docs/EXPERIMENTS.md
-# --------------------------------------------------------------------------------------
-
 
 def summarize(judged: Sequence[dict], n_problems: int | None = None) -> dict:
     """Counts needed for the report: reasons, acceptance per family/level, problem coverage."""
@@ -416,10 +412,7 @@ def format_summary(summary: dict, n_selected: int | None = None) -> str:
     return "\n".join(lines)
 
 
-# --------------------------------------------------------------------------------------
 # JSONL helpers
-# --------------------------------------------------------------------------------------
-
 
 def read_jsonl(path: str | Path) -> list[dict]:
     path = Path(path)
@@ -446,16 +439,14 @@ def write_jsonl(path: str | Path, rows: Iterable[dict]) -> None:
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
-# --------------------------------------------------------------------------------------
 # Generation (GPU)
-# --------------------------------------------------------------------------------------
-
 
 def _generate_group(model, tokenizer, prompts: list[str], n: int, max_new_tokens: int):
-    """Sample ``n`` completions for each prompt. Returns ``[(text, n_tokens, finished)]``.
+    """
+    Sample n completions for each prompt. Returns [(text, n_tokens, finished)].
 
-    The result is prompt-major: the ``n`` samples of prompt 0 come first, then those of
-    prompt 1, and so on (``num_return_sequences`` orders them like that). On a CUDA
+    The result is prompt-major: the n samples of prompt 0 come first, then those of
+    prompt 1, and so on (num_return_sequences orders them like that). On a CUDA
     out-of-memory error the group is split (first the prompts, then the samples) and
     retried, so a long batch never kills a 24-hour run.
     """
@@ -473,7 +464,7 @@ def _generate_group(model, tokenizer, prompts: list[str], n: int, max_new_tokens
                 **TEACHER_SAMPLING,
             )
     except torch.cuda.OutOfMemoryError:
-        pass  # handled below, outside the ``except`` block, so the failed tensors can be freed
+        pass
 
     if output is None:
         torch.cuda.empty_cache()
@@ -517,12 +508,13 @@ def generate_traces(
     seed: int = 0,
     prefill: bool = True,
 ) -> int:
-    """Generate ``samples`` teacher completions per problem and append them to ``raw_output``.
+    """
+    Generate samples teacher completions per problem and append them to raw_output.
 
-    Problems whose id is already in ``raw_output`` are skipped, which makes the function
-    resumable. Each batch is written to disk right after it finishes. With ``prefill`` the
-    prompt ends with ``THINK_PREFILL`` (see its comment) and the stored ``raw`` text starts
-    with that prefix, so downstream code sees one complete ``<think>…`` text either way.
+    Problems whose id is already in raw_output are skipped, which makes the function
+    resumable. Each batch is written to disk right after it finishes. With prefill the
+    prompt ends with THINK_PREFILL (see its comment) and the stored raw text starts
+    with that prefix, so downstream code sees one complete <think>… text either way.
     Returns the number of problems generated in this call.
     """
     import torch
@@ -535,7 +527,7 @@ def generate_traces(
         return 0
 
     tokenizer = AutoTokenizer.from_pretrained(teacher)
-    tokenizer.padding_side = "left"  # generation continues from the right edge of the prompt
+    tokenizer.padding_side = "left"
     model = AutoModelForCausalLM.from_pretrained(teacher, dtype=torch.bfloat16)
     model.to("cuda" if torch.cuda.is_available() else "cpu").eval()
 
@@ -592,10 +584,7 @@ def generate_traces(
     return len(pending)
 
 
-# --------------------------------------------------------------------------------------
 # Filtering and CLI
-# --------------------------------------------------------------------------------------
-
 
 def filter_raw(raw_rows: Sequence[dict], args: argparse.Namespace) -> tuple[list[dict], list[dict]]:
     """Judge every raw generation and select the traces that go to the SFT file."""
