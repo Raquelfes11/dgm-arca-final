@@ -21,6 +21,12 @@ TRACE = "<think>\nVale, voy a resolverlo paso a paso.\n</think>\n<answer>9 gotas
 
 
 def write_traces(path, n_problems: int = 20, per_problem: int = 2, unverified: int = 0):
+    """
+    Write a fake traces file and return its path.
+
+    Each of the n_problems problems gets per_problem verified traces, and unverified extra rows 
+    are added with verified: False.
+    """
     rows = []
     for problem in range(n_problems):
         for sample in range(per_problem):

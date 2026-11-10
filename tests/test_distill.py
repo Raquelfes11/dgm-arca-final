@@ -43,6 +43,12 @@ SPANISH_THINKING = (
 
 
 def make_record(raw: str, **overrides) -> dict:
+    """
+    Build one raw teacher generation, as rlm.distill writes it to disk.
+
+    Defaults describe a finished dilution problem whose answer is 95 mL; pass keyword
+    arguments (finished=False, n_new_tokens=1900...) to override any field.
+    """
     record = {
         "id": 0,
         "sample": 0,
@@ -62,6 +68,7 @@ def make_record(raw: str, **overrides) -> dict:
 
 
 def teacher_text(thinking: str = SPANISH_THINKING, final: str = "<answer>95,0 mL</answer>") -> str:
+    """Render a teacher output: reasoning inside <think> followed by the final answer."""
     return f"<think>\n{thinking}\n</think>\n\n{final}"
 
 
@@ -139,6 +146,7 @@ class TestSpanishRatio:
 
 
 class TestJudgeGeneration:
+    """Verdict of judging a generation built from raw and overrides."""
     def verdict(self, raw: str, **overrides) -> str:
         return judge_generation(make_record(raw, **overrides), VERIFIER)["verdict"]
 
@@ -199,6 +207,10 @@ class TestJudgeGeneration:
 
 class TestSelectTraces:
     def judged(self):
+        """
+        Problem 7: three accepted traces (900, 300, 600 tokens) and one wrong.
+        Problem 8: only a wrong one.
+        """
         rows = []
         for sample, tokens in enumerate([900, 300, 600]):
             rows.append(
@@ -222,6 +234,7 @@ class TestSelectTraces:
 class TestProblems:
     @pytest.fixture
     def problems(self):
+        """Ten problems: five of the dilution family and five of drops."""
         rows = []
         for family in ("dilution", "drops"):
             for i in range(5):
@@ -265,6 +278,10 @@ def test_teacher_messages_ask_for_spanish_without_changing_the_question():
 
 
 def test_filter_summary_and_sft_rows_end_to_end():
+    """
+    Three generations (one accepted, one wrong value, one truncated) go through
+    filtering, the summary and the conversion to an SFT row.
+    """
     raw = [
         make_record(teacher_text(), id=0, sample=0),
         make_record(teacher_text(final="<answer>90 mL</answer>"), id=0, sample=1),
@@ -288,4 +305,4 @@ def test_filter_summary_and_sft_rows_end_to_end():
 
     row = to_sft_row(selected[0])
     assert row["verified"] is True and has_valid_format(row["trace"])
-    assert {"question", "trace", "verified"} <= row.keys()  # what rlm.train_sft reads
+    assert {"question", "trace", "verified"} <= row.keys()
