@@ -127,22 +127,36 @@ def main() -> None:
     if args.ids:
         tasks = [t for t in tasks if t.get("id") in set(args.ids)]
     agent = ReActAgent.from_env()
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
     results = {}
     for brain in args.brains:
         rows = []
-        for task in tasks:
-            response = agent.run(task["task"], max_steps=args.max_steps, brain=brain).model_dump()
-            ok = response["succeeded"] and check_answer(task, response["final_answer"])
-            used = tools_used(response["steps"])
-            rows.append(
-                {
-                    **task,
-                    **response,
-                    "correct": ok,
-                    "tools_used": sorted(used),
-                    "required_tools_used": set(task.get("required_tools", [])) <= used,
-                }
-            )
+        try:
+            for i, task in enumerate(tasks, 1):
+                response = agent.run(task["task"], max_steps=args.max_steps, brain=brain)
+                response = response.model_dump()
+                ok = response["succeeded"] and check_answer(task, response["final_answer"])
+                used = tools_used(response["steps"])
+                rows.append(
+                    {
+                        **task,
+                        **response,
+                        "correct": ok,
+                        "tools_used": sorted(used),
+                        "required_tools_used": set(task.get("required_tools", [])) <= used,
+                    }
+                )
+                print(
+                    f"[{brain}] {i}/{len(tasks)} {task.get('id', '?')}: "
+                    f"{'OK' if ok else 'fail'} ({response['n_steps']} steps)",
+                    flush=True,
+                )
+        except (ValueError, OSError) as error:  # e.g. the rlm adapter is not configured
+            print(f"[{brain}] skipped: {error}", flush=True)
+            results[brain] = {"error": f"{type(error).__name__}: {error}", "rows": rows}
+            out.write_text(json.dumps(results, indent=2, ensure_ascii=False, default=list))
+            continue
         core = [r for r in rows if r.get("core", True)]
         edge = [r for r in rows if not r.get("core", True)]
         categories = sorted({r.get("category", "-") for r in rows})
@@ -157,12 +171,11 @@ def main() -> None:
         print(
             f"{brain:>9}: success {results[brain]['success_rate']:.2f} "
             f"· steps {results[brain]['mean_steps']:.1f} · edge cases "
-            f"{results[brain]['edge']['success_rate']:.2f} ({len(edge)})"
+            f"{results[brain]['edge']['success_rate']:.2f} ({len(edge)})",
+            flush=True,
         )
-
-    out = Path(args.out)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(results, indent=2, ensure_ascii=False, default=list))
+        # Saved after every brain, so a failure in a later one never loses what is done.
+        out.write_text(json.dumps(results, indent=2, ensure_ascii=False, default=list))
 
 
 if __name__ == "__main__":
