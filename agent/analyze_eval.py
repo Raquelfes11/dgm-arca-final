@@ -1,7 +1,8 @@
 """Read reports/phase4_eval.json and explain why each brain fails, not only how often.
 
     uv run python -m agent.analyze_eval
-    uv run python -m agent.analyze_eval --report reports/phase4_eval.json --markdown reports/phase4_analysis.md
+    uv run python -m agent.analyze_eval --report reports/phase4_eval.json \\
+        --markdown reports/phase4_analysis.md
 
 The success rate of agent/evaluate.py is one number per brain. When it is low it does not
 say whether the model reasons badly, never calls a tool, writes calls the parser cannot read,
