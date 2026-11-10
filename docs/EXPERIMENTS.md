@@ -2241,3 +2241,117 @@ sin la regla. Los tokens de los distintos cerebros son comparables en la medida 
 tokenizadores lo sean; no lo hemos verificado.
 
 ---
+
+### 2026-11-10 · Fase 4 · Banco de tareas: diseño, comprobador y validación
+
+**Qué queríamos saber.** Cómo medir al agente con tareas que obliguen a usar al menos dos herramientas y
+cuya respuesta final se pueda comprobar sin leerla a mano, y si el banco que escribíamos era fiable
+antes de gastar GPU en él.
+
+**Qué hicimos.** Escribimos 25 tareas en `agent/bench/tasks.jsonl`: 20 principales (cada una necesita al
+menos dos herramientas distintas) y 5 de borde (`"core": false`), que se miden aparte y no entran en la
+tasa de éxito. Las principales son de cinco tipos: cálculo a partir de una ficha (t01–t09), cálculo con
+cambio de unidades o elección de un valor de un rango (t10–t13), concentración sacada de CIMA en vivo
+(t14, t15), combinación de dos fichas (t16–t18) y tres o cuatro cálculos seguidos (t19, t20). Las de
+borde son: medicamento que no está en el corpus (t21, t22), hoja PDF que el agente bloquea por pedir
+confirmación (t23), conversión imposible sin la concentración (t24) y medicamento que no existe en
+CIMA (t25). El dato clínico de cada tarea sale de una ficha del corpus (13 de las 47) y se guarda como
+pasaje literal en `evidence`; los pesos, las concentraciones y la pregunta son inventados. La
+aritmética que da cada número esperado está en `answer_exprs`.
+
+Corregimos el comprobador de `agent/evaluate.py`. El original quitaba las comas antes de buscar el
+número, así que "7,5 mg/kg" se leía como 75 y "1.050" como 1,05. Ahora lee `7,5` como 7,5, `2.310` y
+`2,310` como 2310, y `1.050` como 1,05 o 1050 (el texto no dice cuál de los dos es). Añadimos las
+comprobaciones `all`, `any` y `negate` (para exigir que el agente no dé ninguna dosis en las tareas
+imposibles) y separamos las tareas de borde en el resumen. También cambiamos el bucle para guardar el
+JSON después de cada cerebro y mostrar una línea por tarea: la primera ejecución falló en `rlm` por no
+tener `ARCA_RLM_ADAPTER` y se perdieron los resultados de `base`, que ya habían terminado.
+
+`uv run python -m agent.validate_bench` comprueba la estructura, que `answer_exprs` dé el valor del
+`check`, que las herramientas existan y que cada `evidence` siga literalmente en `rag/corpus/`; hay que
+repetirlo cada vez que se vuelva a descargar el corpus, porque CIMA actualiza las fichas. Con
+`--retrieval` mira además cuántos pasajes de evidencia llegan al top-5 del retriever de la fase 3
+(recursivo e híbrido, λ = 0,4). Tests en `tests/test_agent_bench.py`.
+
+**Qué pasó.** El banco pasa la validación (25 tareas, 20 principales) y los tests. Con `--retrieval`, solo
+en 7 de las 20 principales llegan al top-5 todos los pasajes de evidencia (t01, t04, t05, t06, t07, t12,
+t14). En t03, t08, t16, t18 y t19 llega una parte, y en t02, t09, t10, t11, t13, t15, t17 y t20 no llega
+ninguno.
+
+**Qué concluimos.** El banco es utilizable, con tres cautelas. Primera: el `check` numérico acepta
+cualquier número de la respuesta que coincida, así que con valores pequeños (un 2 o un 4) un modelo
+puede acertar por casualidad; por eso cada fila guarda `required_tools_used` y el análisis distingue el
+éxito "fiel". Segunda: t14 y t15 dependen de la API de CIMA. Tercera: los 7/20 del retriever son un
+suelo, porque el validador exige que el pasaje esté entero en un solo chunk, y uno partido justo por el
+medio cuenta como no encontrado aunque se haya recuperado. Aun así, encaja con lo que vimos en la
+fase 3: los fallos se concentran en secciones de posología, y desde que los encabezados del corpus no
+llevan el nombre del fármaco los chunks tampoco lo llevan. Hipótesis que no hemos probado: anteponer el
+título de la ficha a cada chunk en `rag/chunking.py` y repetir `rag.evaluate`.
+
+---
+
+### 2026-11-10 · Fase 4 · Primera evaluación de los tres cerebros en el banco
+
+**Qué queríamos saber.** Cuántas de las 20 tareas principales resuelve cada cerebro (`base`, `rlm`,
+`thinking`) y, si son pocas, por qué.
+
+**Qué hicimos.** Una ejecución por tarea y cerebro, sin repeticiones, con el agente tal como estaba en la
+rama `main`:
+
+```
+export ARCA_RLM_ADAPTER=rlm/weights/final_rlm_lora_sin_kl
+export ARCA_RLM_ADAPTER_REPO=isamorell/dgm-arca-rlm-lora-sin-kl
+uv run python -m agent.evaluate --bench agent/bench/tasks.jsonl --brains base rlm thinking
+uv run python -m agent.analyze_eval --markdown reports/phase4_analysis.md
+```
+
+`base` es Qwen3-0.6B, `rlm` es ese modelo con el adaptador GRPO sin KL y `thinking` es Qwen3-1.7B.
+`agent/analyze_eval.py` lee `reports/phase4_eval.json` y, además de la tasa de éxito, saca el éxito
+"fiel" (correcto y con las herramientas requeridas), los pasos sin llamada válida, las respuestas vacías,
+el uso de la base de conocimiento y una clasificación de cada fallo en una sola clase. Resultados
+completos en `reports/phase4_eval.json` y `reports/phase4_analysis.md`.
+
+**Qué pasó.**
+
+| | base | rlm | thinking |
+|---|---|---|---|
+| Éxito, 20 tareas principales | 0/20 | 0/20 | 2/20 |
+| Éxito fiel | 0/20 | 0/20 | 1/20 |
+| Casos de borde acertados | 0/5 | 0/5 | 1/5 |
+| Llegan a `final_answer` | 3/20 | 10/20 | 15/20 |
+| Respuestas vacías | 0/20 | 9/20 | 0/20 |
+| Pasos sin llamada válida | 30/58 | 23/34 | 22/50 |
+| Usa la base de conocimiento (si la necesita) | 0/18 | 1/18 | 4/18 |
+| Pasos medios · tokens medios | 2,9 · 6103 | 1,7 · 4431 | 2,5 · 7728 |
+
+Por clase de fallo (de 20): `base` no llega a dar una respuesta en 17 y responde sin las herramientas
+necesarias en 3. `rlm` no llega en 10, llama a `final_answer` sin respuesta en 9 y responde sin
+herramientas en 1. `thinking` no llega en 5, responde sin las herramientas necesarias en 12 y usa las
+herramientas pero se equivoca en 1.
+
+Los tres aciertos de `thinking` no valen lo mismo. t10 es el único hecho como se espera: buscó en la
+base de conocimiento, calculó con `dose_calculator`, convirtió con `convert_units` y respondió 10,5 mg/h.
+t13 (4 mL de furosemida) acertó sin ninguna herramienta, probablemente de memoria. t24 es un caso de
+borde en el que basta con reconocer que falta la concentración. Las respuestas sin herramientas son en su
+mayoría inventadas: 800 mg de gentamicina en vez de 480 (t01), 5200 mg de tobramicina en vez de 325
+(t09), 49 000 mg de linezolid en vez de 8400 (t17). En t25 dijo que Zorbaxil lleva "25 mg por
+comprimido", y en t23 dijo que la hoja de preparación se había generado cuando el agente la bloquea.
+En t04 `thinking` llegó a 0,8 mL, que es correcto, pero dentro de un `Action: {"name": "final_answer", …}`
+escrito como texto y no como `<tool_call>`; al no cerrar con `final_answer` cuenta como fallo. Si se
+ignorara `succeeded`, `thinking` subiría a 3/20 y los otros dos seguirían en 0. `rlm` repite algo parecido
+a lo que vimos con el "12 por 7": llama a `final_answer` con `{}` en 9 de las 20 tareas y el agente lo da por
+bueno (`succeeded=True`, respuesta vacía).
+
+**Qué concluimos.** Estamos en el suelo del banco, así que esta ejecución no permite decir si haber
+entrenado `rlm` ayuda cuando el modelo actúa: con 20 tareas, 2 aciertos son un 10 % y la diferencia con
+0 es de dos tareas, en una sola ejecución. Lo que sí muestran los datos es que el cuello de botella no
+es el razonamiento ni el retriever, sino el formato y el uso de herramientas: más de la mitad de los
+pasos de `base` y `rlm` no contienen una llamada válida (en esa cifra entran los pasos de aviso que
+añade el propio agente al reintentar), `rlm` deja la respuesta vacía en casi la mitad de las tareas, y
+los tres casi no consultan la base de conocimiento (0, 1 y 4 de las 18 tareas que la necesitan). Cosas
+a probar, ninguna probada todavía: aceptar o reforzar con un ejemplo el formato `Action:` que escriben
+los modelos, tratar un `final_answer` sin `answer` como llamada inválida para que el modelo reintente, y
+repetir la evaluación con esos cambios para ver si sube la tasa. Los números no se pueden comparar con
+los de la fase 2, que usaban otras tareas.
+
+---
