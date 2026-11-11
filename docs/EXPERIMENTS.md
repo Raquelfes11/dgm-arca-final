@@ -2355,3 +2355,75 @@ repetir la evaluación con esos cambios para ver si sube la tasa. Los números n
 los de la fase 2, que usaban otras tareas.
 
 ---
+
+### 2026-11-11 · Fase 4 · Aceptar `Action:`, avisar al modelo y no dar por buena una respuesta vacía
+
+**Qué queríamos saber.** Si arreglar los dos fallos de formato que vimos en la primera evaluación (los
+modelos escriben `Action: nombre` en vez del bloque `<tool_call>`, y `rlm` llama a `final_answer` sin
+respuesta y el agente lo da por bueno) sube la tasa de éxito en las 20 tareas principales.
+
+**Qué hicimos.** Tres cambios en `agent/`, todos medidos juntos, sin probar cada uno por separado:
+
+- **Aviso cuando no hay llamada.** Si la salida no trae ninguna llamada válida, el agente le manda al
+  modelo un mensaje que dice que no escriba `Action: nombre` y le recuerda cómo es el bloque
+  `<tool_call>` correcto. Solo se avisa una vez seguida: si falla otra vez, el agente termina.
+- **`Action: nombre` como último recurso.** Antes de avisar, si no hay bloque
+  `<tool_call>` válido, el agente busca `Action: nombre` en el texto que queda fuera de `<think>`. Solo
+  acepta nombres que estén en el registro de herramientas; si hay varios usa el último, y si detrás hay
+  un objeto JSON lo toma como argumentos (si no, los argumentos van vacíos). Lo hemos puesto por si el
+  modelo lo escribe así, pero creemos que no debería darse por válido: la forma correcta es solo el bloque
+  `<tool_call>`, y esto es una concesión a los modelos pequeños, no un formato que queramos fomentar.
+- **`final_answer` vacío cuenta como fallo.** Si `answer` está vacío o en blanco, no se toma como
+  respuesta: la primera vez se le avisa y reintenta, y si se repite el agente termina con
+  `succeeded=False` y respuesta vacía.
+
+Además hemos añadido una regla al principio de las reglas del prompt (`agent/prompts.py`): "The only valid
+way to act is the `<tool_call>` block above. Do not write "Action: tool_name" on its own: it is not
+executed", con el ejemplo de `final_answer` y la indicación de no dejar `answer` vacío. Y `agent/evaluate.py`
+ahora carga el `.env` con `load_dotenv()`, porque antes `rlm` se saltaba con "needs ARCA_RLM_ADAPTER to be
+set" aunque estuviera definido ahí. Misma evaluación que la entrada anterior, una ejecución por tarea y
+cerebro:
+
+```
+uv run python -m agent.evaluate --bench agent/bench/tasks.jsonl --brains base rlm thinking
+uv run python -m agent.analyze_eval --markdown reports/phase4_analysis.md
+```
+
+**Qué pasó.** Entre paréntesis, el valor de la primera evaluación.
+
+| | base | rlm | thinking |
+|---|---|---|---|
+| Éxito, 20 tareas principales | 1/20 (0) | 1/20 (0) | 5/20 (2) |
+| Éxito fiel | 0/20 (0) | 0/20 (0) | 1/20 (1) |
+| Casos de borde acertados | 0/5 (0) | 0/5 (0) | 2/5 (1) |
+| Llegan a `final_answer` | 14/20 (3) | 19/20 (10) | 18/20 (15) |
+| Respuestas vacías | 0/20 (0) | 0/20 (9) | 0/20 (0) |
+| Pasos sin llamada válida | 3/63 (30/58) | 5/27 (23/34) | 11/60 (22/50) |
+| Usa la base de conocimiento (si la necesita) | 3/18 (0) | 1/18 (1) | 10/18 (4) |
+| Pasos medios · tokens medios | 3,1 · 6819 | 1,4 · 3715 | 3,0 · 9644 |
+
+Por clase de fallo, en las 20 tareas principales:
+
+| Clase de fallo | base | rlm | thinking |
+|---|---|---|---|
+| No llega a dar una respuesta (se agotan los pasos o no hay llamada válida) | 6/20 | 1/20 | 2/20 |
+| Llama a `final_answer` pero sin respuesta | 0/20 | 0/20 | 0/20 |
+| Responde sin usar las herramientas necesarias | 13/20 | 18/20 | 10/20 |
+| Usa las herramientas necesarias pero el resultado es incorrecto | 0/20 | 0/20 | 3/20 |
+
+El único acierto de `rlm` (t14) no usó las herramientas requeridas, por eso su éxito fiel es 0. Los resultados completos están en `reports/phase4_eval.json` y
+`reports/phase4_analysis.md`.
+
+**Qué concluimos.** Los cambios arreglan lo que pretendían: las respuestas vacías de `rlm` pasan de 9 a
+0, casi todas las ejecuciones terminan con una respuesta (de 3, 10 y 15 de 20 a 14, 19 y 18) y los pasos
+sin llamada válida bajan mucho en `base` y `rlm`. Pero el éxito sube poco (de 0, 0 y 2 a 1, 1 y 5 de 20)
+y los modelos siguen fallando la mayoría de las veces, ya no por el formato sino porque responden sin
+usar las herramientas necesarias (13, 18 y 10 de 20). `rlm` casi siempre contesta en un solo paso sin
+buscar nada, así que el adaptador no mejora aquí el uso de herramientas respecto a `base`. Límites: es una
+sola ejecución por cerebro, con 20 tareas una diferencia de una o dos tareas no es una diferencia fiable
+(`thinking` ya varió entre ejecuciones durante estas pruebas), no sabemos cuánto aporta cada uno de los
+tres cambios, y que `Action: nombre` se acepte hace que el agente tolere una salida que consideramos
+incorrecta. Falta probar un ejemplo completo en el prompt (buscar en la base de conocimiento, calcular y
+`final_answer`) y medir si los modelos empiezan a usar las herramientas.
+
+---
