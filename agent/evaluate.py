@@ -117,6 +117,10 @@ def main() -> None:
     parser.add_argument("--out", default="reports/phase4_eval.json")
     args = parser.parse_args()
 
+    from dotenv import load_dotenv
+
+    load_dotenv()  # ARCA_RLM_ADAPTER and the model ids live in each teammate's .env
+
     from agent.react_agent import ReActAgent
 
     tasks = [

@@ -19,12 +19,14 @@ import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import re
+
 from agent.memory import ConversationMemory
 from agent.prompts import REACT_SYSTEM_PROMPT, SUMMARY_PROMPT
 from api.schemas import AgentAction, AgentResponse, AgentStep, ToolCallRecord
 from tool_use.registry import ToolRegistry, tool
 from tool_use.tools import default_registry
-from tool_use.parser import parse_tool_calls
+from tool_use.parser import THINK_PATTERN, ToolCall, parse_tool_calls
 from rag.retriever import build_retrievers
 
 RETRIEVER = "hybrid"
@@ -37,7 +39,33 @@ TOOL_TIMEOUT_S = 30
 SUMMARY_FALLBACK_CHARS = 1000  # used when the model gives no summary
 MAX_REPEATED_CALLS = 3  # the same call (name + arguments) this many times stops the run
 
+ACTION_PATTERN = re.compile(r"Action:\s*`?(?P<name>[A-Za-z_]\w*)`?")
+
 _retriever = None
+
+def _action_line_fallback(raw: str, known_tools) -> ToolCall | None:
+    """Read ``Action: tool_name`` (optionally followed by a JSON object) written without a
+    ``<tool_call>`` block. Small models do this a lot (phase 4: ~half of the steps without a
+    valid call). Only names that exist in the registry count, and only text outside ``<think>``.
+    """
+    visible = THINK_PATTERN.sub("", raw)
+    visible = visible.rsplit("<think>", 1)[0] if "<think>" in visible else visible
+    matches = [m for m in ACTION_PATTERN.finditer(visible) if m.group("name") in known_tools]
+    if not matches:
+        return None
+    match = matches[-1]  # the last Action: is the decision the model ended up with
+    arguments: dict = {}
+    rest = visible[match.end():].lstrip()
+    if rest.startswith("{"):
+        try:
+            payload, _ = json.JSONDecoder().raw_decode(rest)
+        except json.JSONDecodeError:
+            payload = None
+        if isinstance(payload, dict):
+            arguments = payload.get("arguments", payload) if "name" in payload else payload
+            if not isinstance(arguments, dict):
+                arguments = {}
+    return ToolCall(name=match.group("name"), arguments=arguments)
 
 def _get_retriever():
     """Ingest -> chunk -> build_retrievers, one single time. Returns the chosen retriever."""
@@ -282,23 +310,39 @@ class ReActAgent:
             if raw.count("<tool_call>") > raw.count("</tool_call>"):
                 raw += "\n</tool_call>"  # small models sometimes stop before closing the tag
             parsed = parse_tool_calls(raw)
+            if not parsed.has_tool_calls:
+                fallback = _action_line_fallback(raw, self.registry.tools)
+                if fallback is not None:
+                    parsed.tool_calls = [fallback]
             thought = parsed.thinking or parsed.text
-            if not parsed.has_tool_calls and not nudged:
+            problem = None  # why this step cannot be run, if it cannot
+            if parsed.has_tool_calls:
+                first = next(c for c in parsed.tool_calls if c.error is None)
+                if first.name == "final_answer" and not str(first.arguments.get("answer", "")).strip():
+                    problem = (
+                        "final_answer was called without an answer. Call it again with the "
+                        'complete answer: <tool_call>{"name": "final_answer", "arguments": '
+                        '{"answer": "..."}}</tool_call>'
+                    )
+            if (not parsed.has_tool_calls or problem) and not nudged:
                 # first format failure: tell the model what went wrong and let it try again
                 nudged = True
                 errors = [c.error for c in parsed.tool_calls if c.error]
-                message = (
-                    f"Invalid tool call: {errors[0]}. " if errors else "No tool call found. "
-                ) + "Reply with one <tool_call>{...}</tool_call> block, or call final_answer."
+                message = problem or (
+                    (f"Invalid tool call: {errors[0]}. " if errors else "No tool call found. ")
+                    + "Do not write 'Action: name'. Reply with one "
+                    '<tool_call>{"name": "...", "arguments": {...}}</tool_call> block, '
+                    "or call final_answer."
+                )
                 self.steps.append(AgentStep(thought=thought, observation=message))
                 memory.add("assistant", raw)
                 memory.add("user", message)
                 continue
-            if not parsed.has_tool_calls:
+            if not parsed.has_tool_calls or problem:
                 # second failure in a row: accept what the model wrote, but flag it
                 self.steps.append(AgentStep(thought=thought, observation="(no tool call)"))
                 return AgentResponse(
-                    final_answer=parsed.text or thought, # what the model wrote outside <think> and <tool_call> tags
+                    final_answer="" if problem else (parsed.text or thought),  # an empty final_answer is not an answer
                     steps = self.steps,
                     n_steps=step+1,
                     succeeded=False
