@@ -74,6 +74,7 @@ class ToolCallRecord(BaseModel):
     ok: bool = True
     error: str | None = None
     latency_ms: float = 0.0
+    requires_confirmation: bool = False
 
 
 class ToolsResponse(BaseModel):
@@ -103,6 +104,10 @@ class RagResponse(BaseModel):
     answer: str
     chunks: list[RetrievedChunk]
     citations: list[str] = Field(default_factory=list, description="Chunk ids cited in the answer.")
+    invalid_citations: list[str] = Field(
+        default_factory=list,
+        description="Ids in square brackets in the answer that are not among the returned chunks.",
+    )
     retriever: Literal["dense", "bm25", "hybrid"]
     model: str = ""
 

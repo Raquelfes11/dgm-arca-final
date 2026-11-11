@@ -326,8 +326,9 @@ ni número de épocas; los elegidos son valores de partida razonables, no óptim
 
 Esta pérdida mide cuánto se parece el modelo al texto del profesor, no si sus respuestas son
 correctas. La comprobación real es el pass@1 sobre `rlm/data/test.jsonl` (y `test_ood.jsonl`)
-con `rlm/evaluate.py`, comparando el modelo base y el SFT. Está pendiente y es el siguiente
-paso, junto con revisar a mano unos cuantos fallos.
+con `rlm/evaluate.py`, comparando el modelo base y el SFT. Estaba pendiente cuando escribimos
+esta entrada; después se midió: 80,5 % en test (entrada del 2026-10-12) y 24,0 % en OOD (entrada
+del 2026-10-14).
 
 ### 2026-10-11 · Fase 1 · GRPO sin beta y con beta 0.04
 

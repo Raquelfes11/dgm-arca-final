@@ -1,0 +1,562 @@
+{
+  "metrics": {
+    "model": "Qwen/Qwen3-4B",
+    "n_questions": 48,
+    "cites_something": 0.9375,
+    "cites_gold_chunk": 0.6875,
+    "retrieved_gold_chunk": 0.7291666666666666,
+    "answers_with_invented_ids": 0.0,
+    "unanswerable_that_cite": 0.25
+  },
+  "answerable": [
+    {
+      "question": "¿Cómo debe ajustarse la dosis de cefotaxima en pacientes con insuficiencia renal grave?",
+      "answer": "La dosis de cefotaxima debe ajustarse según el cálculo del aclaramiento de creatinina (ver sección 4.2). En pacientes con insuficiencia renal grave, se debe reducir la dosis de cefotaxima para compensar su excreción más lenta. Además, se debe monitorizar la función renal en estos pacientes, en los pacientes de edad avanzada y en aquellos con insuficiencia renal previa [7f4d67e570-0026].",
+      "citations": [
+        "7f4d67e570-0026"
+      ],
+      "invented": [],
+      "retrieved_has_gold": false,
+      "cites_gold": false
+    },
+    {
+      "question": "¿Qué ocurre cuando se administra meropenem junto con probenecid y qué recomendación da la ficha técnica?",
+      "answer": "Cuando se administra meropenem junto con probenecid, este último compite con meropenem en la secreción tubular activa, lo que inhibe su excreción renal, aumentando la vida media de eliminación y la concentración plasmática del meropenem. Por lo tanto, se requiere precaución al co-administrar ambos medicamentos [de9b07db3c-0021]. La ficha técnica no recomienda el uso concomitante de probenecid con meropenem, aunque en este caso se menciona que se requiere precaución en lugar de una prohibición explícita [de9b07db3c-0021].",
+      "citations": [
+        "de9b07db3c-0021"
+      ],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": true
+    },
+    {
+      "question": "¿En qué situaciones está contraindicado el ibuprofeno intravenoso?",
+      "answer": "El ibuprofeno intravenoso está contraindicado en las siguientes situaciones:\n\n1. En recién nacidos con concentración de bilirrubina elevada marcada, debido al riesgo aumentado de encefalopatía bilirrubínica [228d4cf6f2-0009].\n\n2. En pacientes con hipersensibilidad conocida al ibuprofeno o a cualquier otro componente del medicamento [7aa5c27c2c-0016].\n\nAdemás, aunque no se menciona explícitamente la contraindicación en la lactancia para el ibuprofeno, se debe tener en cuenta que el ibuprofeno puede excretarse en la leche materna, por lo que se recomienda precaución en pacientes lactantes [d31fc0c7c6-0055].",
+      "citations": [
+        "228d4cf6f2-0009",
+        "7aa5c27c2c-0016",
+        "d31fc0c7c6-0055"
+      ],
+      "invented": [],
+      "retrieved_has_gold": false,
+      "cites_gold": false
+    },
+    {
+      "question": "¿Cuál es la dosis máxima diaria de dexketoprofeno y durante cuánto tiempo se recomienda su uso?",
+      "answer": "La información proporcionada no incluye la dosis máxima diaria de dexketoprofeno. Sin embargo, se menciona que durante el primer y segundo trimestre de embarazo, la dosis y la duración del tratamiento con dexketoprofeno deberán ser tan bajas como sea posible si se administra a mujeres que desean quedarse embarazadas o durante el primer o segundo trimestre de embarazo [d31fc0c7c6-0053]. Además, se recomienda que el tratamiento con dexketoprofeno se interrumpa en caso de encontrarse oligohidramnios o constricción del ductus arteriosus después de la exposición a dexketoprofeno durante varios días desde la semana gestacional 20 en adelante [d31fc0c7c6-0053]. \n\nPor lo tanto, no hay suficiente información para determinar la dosis máxima diaria de dexketoprofeno.",
+      "citations": [
+        "d31fc0c7c6-0053"
+      ],
+      "invented": [],
+      "retrieved_has_gold": false,
+      "cites_gold": false
+    },
+    {
+      "question": "¿Qué cantidad de ceftriaxona contiene cada vial y qué excipiente con efecto se conoce?",
+      "answer": "Cada vial contiene 1.000 mg de ceftriaxona (como ceftriaxona sódica) [398bb4b1b8-0001]. El excipiente con efecto conocido es el sodio, que contiene 83,24 mg por vial [398bb4b1b8-0001].",
+      "citations": [
+        "398bb4b1b8-0001"
+      ],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": true
+    },
+    {
+      "question": "¿Qué precauciones especiales de conservación se deben tener con el ertapenem?",
+      "answer": "La información proporcionada no menciona precauciones especiales de conservación del ertapenem, sino advertencias y precauciones especiales de empleo. Por lo tanto, no hay información suficiente para responder a la pregunta sobre precauciones de conservación.",
+      "citations": [],
+      "invented": [],
+      "retrieved_has_gold": false,
+      "cites_gold": false
+    },
+    {
+      "question": "¿Cómo se reconstituye la amoxicilina y qué aspecto puede presentar la solución durante la reconstitución?",
+      "answer": "La amoxicilina se reconstituye añadiendo 20 ml de solvente habitual (agua para preparaciones inyectables Ph.Eur.) al vial, lo que resulta en aproximadamente 20,9 ml de solución para uso en dosis única. Durante la reconstitución, se puede observar una coloración rosa pálido [03e2eb562d-0047].",
+      "citations": [
+        "03e2eb562d-0047"
+      ],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": true
+    },
+    {
+      "question": "¿Cuál es el periodo de validez del linezolid y en qué condiciones?",
+      "answer": "El periodo de validez del linezolid no se menciona explícitamente en los pasajes proporcionados. Sin embargo, se indica que se notificó una mayor incidencia de anemia grave en pacientes que estaban siendo tratados con linezolid durante periodos de tiempo superiores a la duración máxima de tratamiento recomendada de 28 días [d57fe72b8a-0020]. Esto sugiere que la duración máxima de tratamiento recomendada es de 28 días.\n\nEn cuanto a las condiciones en las que debe usarse el linezolid, se menciona que debe usarse con especial precaución en pacientes con insuficiencia renal grave y únicamente si el beneficio esperado se considera superior al posible riesgo [d57fe72b8a-0039]. También se indica que no debe usarse en pacientes que estén tomando medicamentos que inhiban las monoamino oxidasas A o B ni durante las dos semanas siguientes a la toma dicha medicación [d57fe72b8a-0013]. Además, no se debe administrar a pacientes con ciertas condiciones clínicas basales o que estén en tratamiento con medicamentos específicos a menos que se disponga de los medios necesarios para realizar un estrecho control y monitorización de la tensión arterial [d57fe72b8a-0013].",
+      "citations": [
+        "d57fe72b8a-0020",
+        "d57fe72b8a-0039",
+        "d57fe72b8a-0013"
+      ],
+      "invented": [],
+      "retrieved_has_gold": false,
+      "cites_gold": false
+    },
+    {
+      "question": "¿Cúales son los síntomas de sobredosis por fentanilo?",
+      "answer": "Los síntomas de sobredosis por fentanilo incluyen letargo, coma, depresión respiratoria con respiración de Cheyne-Stokes o cianosis, hipotermia, disminución del tono muscular, bradicardia, hipotensión, sedación profunda, ataxia, miosis, convulsiones y depresión respiratoria, que es el síntoma principal. También se han descrito casos de leucoencefalopatía tóxica con la sobredosis de fentanilo [7098aa5906-0038].",
+      "citations": [
+        "7098aa5906-0038"
+      ],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": true
+    },
+    {
+      "question": "¿Qué tipos y tamaños de envase de enoxaparina se pueden encontrar?",
+      "answer": "La información proporcionada no incluye detalles sobre los tipos y tamaños de envase de enoxaparina. Sin embargo, se menciona que la bolsa de perfusión utilizada para diluir el medicamento tiene un volumen de 50 ml [cc1d1324d0-0028]. Además, se menciona que la jeringa precargada contiene 6.000 UI (60 mg) de enoxaparina sódica [cc1d1324d0-0001]. \n\nLa información sobre los tipos y tamaños de envase de enoxaparina no está disponible en los pasajes proporcionados. Por lo tanto, no se puede responder con base en la información proporcionada.",
+      "citations": [
+        "cc1d1324d0-0028",
+        "cc1d1324d0-0001"
+      ],
+      "invented": [],
+      "retrieved_has_gold": false,
+      "cites_gold": false
+    },
+    {
+      "question": "¿Qué se recomienda sobre el tratamiento con magnesio sulfato durante la lactancia?",
+      "answer": "Durante la lactancia, se recomienda suspender el tratamiento con sulfato de magnesio, ya que este se excreta por la lecha materna durante la administración parenteral [daf29b9941-0017].",
+      "citations": [
+        "daf29b9941-0017"
+      ],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": true
+    },
+    {
+      "question": "¿Qué infecciones se pueden tratar con vancomicina?",
+      "answer": "La vancomicina se puede usar para tratar las siguientes infecciones:\n\n- Infecciones complicadas de la piel y los tejidos blandos (IPPBc)\n- Infecciones en los huesos y las articulaciones\n- Neumonía adquirida en la comunidad (NAC)\n- Neumonía intrahospitalaria, incluyendo la neumonía asociada a la ventilación mecánica (NAV)\n- Endocarditis infecciosa\n- Bacteriemia que se produce en asociación, o se sospecha que se asocia con, cualquiera de las infecciones anteriores\n- Infección por Clostridium difficile (ICD) [c4e87629e9-0002][c4e87629e9-0003].",
+      "citations": [
+        "c4e87629e9-0002",
+        "c4e87629e9-0003"
+      ],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": true
+    },
+    {
+      "question": "¿Cuáles son las dosis de daptomicina correspondientes al IPPBc sin BSA y al IPPBc asociada a BSA en pacientes de entre 2 y 6 años?",
+      "answer": "Las dosis de daptomicina correspondientes al IPPBc sin BSA y al IPPBc asociada a BSA en pacientes de entre 2 y 6 años son:\n\n- Para IPPBc sin BSA: 9 mg/kg una vez cada 24 horas por perfusión durante 60 minutos [de92e92f3e-0011].\n- Para IPPBc asociada a BSA: 12 mg/kg una vez cada 24 horas por perfusión durante 60 minutos [de92e92f3e-0011].",
+      "citations": [
+        "de92e92f3e-0011"
+      ],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": true
+    },
+    {
+      "question": "¿Se puede diluir la tobramicina intravenosa en glucosa al 5 % o debe utilizarse exclusivamente cloruro de sodio al 0,9 %?",
+      "answer": "Sí, la tobramicina intravenosa puede diluirse en glucosa al 5%. Según la información proporcionada, para la administración intravenosa de Tobramicina Normon solución inyectable, se recomienda diluirla con cloruro de sodio al 0,9% o con dextrosa al 5% [0f049108c1-0072]. Por lo tanto, no es necesario utilizar exclusivamente el cloruro de sodio al 0,9%, ya que la glucosa al 5% también es una opción válida para la dilución.",
+      "citations": [
+        "0f049108c1-0072"
+      ],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": true
+    },
+    {
+      "question": "¿Cuál es la concentración de paracetamol en la presentación intravenosa y qué precauciones de administración se especifican?",
+      "answer": "La concentración de paracetamol en la presentación intravenosa no se especifica directamente en los pasajes proporcionados. Sin embargo, se menciona que la solución de paracetamol se administra como una perfusión intravenosa y que debe administrarse lentamente, con un tiempo de perfusión que en ningún caso deberá ser inferior a los 15 minutos para evitar reacciones locales, especialmente dolor en el lugar de inyección [dd4c9e923a-0009]. Además, se recomienda utilizar una aguja de 0,8 mm (aguja de calibre 21) para extraer la solución y asegurar la precisión en la dosis [dd4c9e923a-0010]. También se menciona que la solución debe diluirse en una solución de cloruro sódico al 0,9% o en una solución de glucosa al 5% hasta una décima parte [dd4c9e923a-0011].",
+      "citations": [
+        "dd4c9e923a-0009",
+        "dd4c9e923a-0010",
+        "dd4c9e923a-0011"
+      ],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": true
+    },
+    {
+      "question": "¿Qué duración de perfusión y qué instrucciones de dilución se especifican para la azitromicina intravenosa?",
+      "answer": "La duración de perfusión y las instrucciones de dilución para la azitromicina intravenosa se especifican en la siguiente información:\n\n- La duración de perfusión debe ser de **1 hora** para una dosis de 500 mg, con una concentración de **2 mg/ml** [f51b195350-0009].\n- La dilución se realiza añadiendo **4,8 ml de agua esterilizada para preparaciones inyectables** al vial de 500 mg de azitromicina, agitando el vial hasta que todo el polvo se disuelva. Se recomienda el uso de una jeringa estándar de 5 ml (no automática) para asegurar la cantidad exacta de agua [f51b195350-0009].",
+      "citations": [
+        "f51b195350-0009"
+      ],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": true
+    },
+    {
+      "question": "¿Qué dosis iniciales y qué precauciones se recomiendan para el midazolam en ancianos?",
+      "answer": "Para el midazolam en ancianos (adultos mayores de 60 años), se recomienda una dosis inicial de 0,15 a 0,3 mg/kg administrada IV. Además, se debe administrar con lentitud, con una velocidad de aproximadamente 1 mg en 30 segundos. En el caso de los ancianos, se debe empezar administrando una dosis de 0,5 a 1 mg, y pueden administrarse más dosis de 0,5 a 1 mg según las necesidades. Habitualmente, no es necesaria una dosis total superior a 3,5 mg [2e4de1175a-0007].\n\nEn cuanto a las precauciones, se debe ser especialmente precavido cuando se administra midazolam a pacientes de alto riesgo, incluyendo a los adultos mayores de 60 años, pacientes con enfermedades crónicas o debilitados, por ejemplo, pacientes con insuficiencia respiratoria crónica, insuficiencia renal crónica, alteración de la función hepática o alteración de la función cardíaca. También es importante observar atentamente al paciente después de la administración, ya que la sensibilidad interindividual es variable y pueden sobrevenir síntomas de sobredosis [2e4de1175a-0032].",
+      "citations": [
+        "2e4de1175a-0007",
+        "2e4de1175a-0032"
+      ],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": true
+    },
+    {
+      "question": "¿Qué cantidad de principio activo contiene cada vial de cefazolina y cómo debe reconstituirse antes de su administración intramuscular?",
+      "answer": "Cada vial de cefazolina contiene 500 mg de cefazolina (como cefazolina sódica) para la versión de 500 mg [8c60a20425-0001]. Para su administración intramuscular, se debe añadir 1 ml de agua para preparaciones inyectables a cefazolina 500 mg polvo [8a0b991483-0042].",
+      "citations": [
+        "8c60a20425-0001",
+        "8a0b991483-0042"
+      ],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": true
+    },
+    {
+      "question": "¿En cuántos mg hay que reconstituir un vial de amoxicilina antes de prepararlo para perfusión, y cuánto tiempo puede pasar como máximo entre la reconstitución y la administración?",
+      "answer": "La información proporcionada no especifica la cantidad exacta de amoxicilina que hay que reconstituir en un vial antes de prepararlo para perfusión. Sin embargo, se menciona que las soluciones para perfusión intravenosa de amoxicilina/ácido clavulánico se deben preparar inmediatamente después de la reconstitución del contenido del vial, por dilución hasta 100 ml con uno de los siguientes fluidos [03e2eb562d-0042]. \n\nEn cuanto al tiempo máximo entre la reconstitución y la administración, se indica que la solución reconstituida debe usarse inmediatamente después de la reconstitución, ya que se ha demostrado la estabilidad química y física de las soluciones para perfusión en las condiciones mencionadas, pero no se especifica un período máximo de tiempo entre la reconstitución y la administración [03e2eb562d-0042]. \n\nPor lo tanto, no hay suficiente información para responder con exactitud a la pregunta.",
+      "citations": [
+        "03e2eb562d-0042"
+      ],
+      "invented": [],
+      "retrieved_has_gold": false,
+      "cites_gold": false
+    },
+    {
+      "question": "¿Qué reacción adversas puede causar el tratamiento con propofol durante el embarazo y qué síntomas presenta su sobredosis?",
+      "answer": "El tratamiento con propofol durante el embarazo puede causar depresión neonatal, ya que el propofol atraviesa la placenta y puede afectar al feto [7aa5c27c2c-0043]. En cuanto a la sobredosis, aunque no se mencionan directamente los síntomas de sobredosis en el texto proporcionado, las reacciones adversas asociadas al uso de propofol incluyen hipotensión, acidosis metabólica, rabdomiólisis, hiperkalemia, hepatomegalia, insuficiencia renal, hiperlipidemia, arritmia cardíaca, ECG tipo Brugada y insuficiencia cardíaca de rápida evolución [7aa5c27c2c-0028]. Estos síntomas pueden ser indicativos de una sobredosis o de un uso inadecuado del fármaco.",
+      "citations": [
+        "7aa5c27c2c-0043",
+        "7aa5c27c2c-0028"
+      ],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": true
+    },
+    {
+      "question": "¿Qué incompatibilidades tiene la dexmedetomidina? ¿Puede tomarse durante el embarazo?",
+      "answer": "La dexmedetomidina tiene incompatibilidades con otros medicamentos, excepto los mencionados en la sección 6.6. Los estudios de compatibilidad han demostrado potencial para la adsorción de dexmedetomidina a algunos tipos de caucho natural. Aunque dexmedetomidina se dosifica en función del efecto, se recomienda utilizar componentes con juntas de caucho sintético o natural recubiertas [b49e2d62e8-0044].\n\nEn cuanto al uso durante el embarazo, no hay datos o éstos son limitados relativos al uso de la dexmedetomidina en mujeres embarazadas. Los estudios realizados en animales han mostrado toxicidad para la reproducción. No se debe utilizar Dexdor durante el embarazo a menos que el cuadro clínico de la paciente requiera el tratamiento con dexmedetomidina [b49e2d62e8-0031].",
+      "citations": [
+        "b49e2d62e8-0044",
+        "b49e2d62e8-0031"
+      ],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": true
+    },
+    {
+      "question": "¿Afectan la morfina y el tramadol a la capacidad para conducir y utilizar máquinas?",
+      "answer": "Sí, la morfina afecta la capacidad para conducir y utilizar máquinas. Según la información proporcionada, los analgésicos opioides, como la morfina, pueden disminuir la capacidad mental y/o física necesaria para realizar tareas potencialmente peligrosas, especialmente al inicio del tratamiento, tras un aumento de la dosis, tras un cambio de formulación y/o al administrarlo conjuntamente con otros medicamentos. Se debe advertir a los pacientes que no conduzcan ni utilicen máquinas si sienten somnolencia, mareo o alteraciones visuales mientras toman Morfina Serra [2477b4c7fd-0045].\n\nEn cuanto al tramadol, no hay información específica en los pasajes proporcionados sobre su efecto en la capacidad para conducir y utilizar máquinas. Sin embargo, dado que el tramadol es un analgésico opioide, es probable que tenga efectos similares a la morfina en este aspecto. Para una respuesta más precisa, se necesitaría información específica sobre el tramadol.",
+      "citations": [
+        "2477b4c7fd-0045"
+      ],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": true
+    },
+    {
+      "question": "¿Qué reacciones adversas cardiovasculares describen las fichas de amiodarona y de esmolol?",
+      "answer": "Las reacciones adversas cardiovasculares descritas en las fichas de amiodarona y de esmolol son las siguientes:\n\n**Para amiodarona:**\n- Bradicardia, generalmente moderada (frecuentes).\n- Bradicardia acusada, paro sinusal (muy raras), requiriéndose la interrupción de amiodarona, especialmente en pacientes con disfunción del nodo sinusal y / o pacientes de edad avanzada.\n- Episodios de inicio o empeoramiento de las arritmias, seguidos en algunos casos de parada cardíaca.\n- Taquicardia, palpitaciones, palidez, elevación (discreta) de la presión arterial (según la sección 4.8 de la ficha de amiodarona, aunque estas manifestaciones también se mencionan en la ficha de adrenalina).\n- Torsades de pointes (frecuencia no conocida).\n\n**Para esmolol:**\nNo se proporciona información específica sobre las reacciones adversas cardiovasculares de esmolol en el material proporcionado. Sin embargo, se puede inferir que, al ser un beta-bloqueante, podría causar reacciones cardiovasculares como bradicardia, hipotensión, disminución de la frecuencia cardiaca y posiblemente arritmias, aunque estas no se mencionan explícitamente en el texto proporcionado.\n\nPor lo tanto, las reacciones adversas cardiovasculares descritas en la ficha de amiodarona incluyen bradicardia, taquicardia, palpitaciones, paro sinusal, torsades de pointes y episodios de arritmias, mientras que no se proporciona información específica sobre las reacciones cardiovasculares de esmolol.",
+      "citations": [],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": false
+    },
+    {
+      "question": "¿Con qué otros medicamentos o soluciones no deben mezclarse la ceftazidima y la piperacilina/tazobactam?",
+      "answer": "La ceftazidima no debe mezclarse con soluciones de bicarbonato de sodio, ya que es menos estable en dicha solución inyectable [910ed8f16d-0037]. Además, la ceftazidima y los antibióticos aminoglucósidos no se deben mezclar en la misma jeringa [910ed8f16d-0037].\n\nLa piperacilina/tazobactam no debe mezclarse con otras sustancias en una jeringa o frasco para perfusión, ya que no se ha establecido su compatibilidad [9b357fbf8e-0044]. Además, la piperacilina/tazobactam no es compatible con la solución de lactato Ringer [9b357fbf8e-0045] y no debe añadirse a hemoderivados o a hidrolizados de albúmina [9b357fbf8e-0045]. También no debe mezclarse con aminoglucósidos en la misma jeringa [9b357fbf8e-0044].",
+      "citations": [
+        "910ed8f16d-0037",
+        "9b357fbf8e-0044",
+        "9b357fbf8e-0045"
+      ],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": true
+    },
+    {
+      "question": "¿Qué advertencias sobre reacciones de hipersensibilidad y anafilaxia incluyen las fichas de cefuroxima y de cefotaxima?",
+      "answer": "Las fichas de cefuroxima y de cefotaxima incluyen las siguientes advertencias sobre reacciones de hipersensibilidad y anafilaxia:\n\nPara **cefuroxima**:\n- Antes de comenzar el tratamiento, se debe establecer si el paciente tiene antecedentes de reacciones de hipersensibilidad graves a cefuroxima, a otras cefalosporinas o a cualquier otro tipo de agente beta-lactámico. Se debe tener precaución si se va a utilizar cefuroxima en pacientes con antecedentes de hipersensibilidad no grave a otros agentes beta-lactámicos [8a0b991483-0013].\n- Se han notificado reacciones adversas cutáneas graves que incluyen: síndrome de Stevens-Johnson (SSJ), necrolisis epidérmica tóxica (NET) y reacción a fármaco con eosinofilia y síntomas sistémicos (DRESS), que pueden ser potencialmente mortales o mortales, en asociación con el tratamiento con cefuroxima [8a0b991483-0013].\n- En el momento de la prescripción, se debe advertir a los pacientes sobre los signos y síntomas y hacer seguimiento estrecho sobre las reacciones en la piel. Si aparecen signos y síntomas que sugieran estas reacciones, cefuroxima se debe suspender inmediatamente y considerar un tratamiento alternativo [8a0b991483-0014].\n- Reacciones de hipersensibilidad graves y ocasionalmente mortales han sido notificadas. En caso de reacciones de hipersensibilidad graves, el tratamiento con cefuroxima se debe interrumpir inmediatamente y se deben instaurar las medidas de emergencia adecuas [8a0b991483-0012].\n\nPara **cefotaxima**:\n- Se han notificado reacciones de hipersensibilidad graves, incluyendo mortales (p. ej., angioedema, broncoespasmo, anafilaxia a choque) en pacientes que reciben cefotaxima [7f4d67e570-0018].\n- En estos casos, el tratamiento con cefotaxima debe interrumpirse e instaurar el tratamiento oportuno (p. ej., tratamiento contra el choque) [7f4d67e570-0018].\n- Se debe proceder con especial precaución antes de la administración de cefotaxima en pacientes con hipersensibilidad a la penicilina y otros antibióticos betalactámicos, pues podría haber reacciones cruzadas [7f4d67e570-0018].\n- Cefotaxima está contraindicado en caso de antecedentes conocidos de reacciones de hipersensibilidad inmediata o reacciones de hipersensibilidad grave a cefotaxima y otras cefalosporinas; también en caso de reacciones anafilácticas a la penicilina o a otros antibióticos betalactámicos [7f4d67e570-0017].",
+      "citations": [
+        "8a0b991483-0013",
+        "8a0b991483-0014",
+        "8a0b991483-0012",
+        "7f4d67e570-0018",
+        "7f4d67e570-0017"
+      ],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": true
+    },
+    {
+      "question": "¿Cuáles son las contraindicaciones principales que figuran en las fichas de metamizol y de ketamina?",
+      "answer": "Las contraindicaciones principales que figuran en las fichas de metamizol y de ketamina son las siguientes:\n\n**Para metamizol:**\n- Casos de hepatitis aguda de patrón predominantemente hepatocelular, que se han notificado en pacientes tratados con metamizol. Este efecto puede manifestarse con aumento de enzimas hepáticas, ictericia, y en algunos casos, progresión a insuficiencia hepática aguda que requirió trasplante de hígado [cc623ee4ba-0026].\n\n**Para ketamina:**\n- No debe mezclarse ketamina con barbitúricos o diazepam en la misma jeringa o botella de infusión debido a su incompatibilidad química [4a22951867-0041].\n- Uso en alcohólicos crónicos y en pacientes con intoxicación etílica aguda.\n- Uso en pacientes con cirrosis u otros tipos de insuficiencia hepática, donde se debe considerar una reducción de la dosis para evitar una duración de la acción demasiado prolongada [4a22951867-0018].",
+      "citations": [
+        "cc623ee4ba-0026",
+        "4a22951867-0041",
+        "4a22951867-0018"
+      ],
+      "invented": [],
+      "retrieved_has_gold": false,
+      "cites_gold": false
+    },
+    {
+      "question": "¿Qué riesgos durante el embarazo y la lactancia se describen para la noradrenalina y la furosemida?",
+      "answer": "Para la **noradrenalina**, se describe el riesgo de que pueda contraer los vasos sanguíneos del útero y reducir el flujo sanguíneo uterino, produciendo anoxia o hipoxia fetal. Además, no se han llevado a cabo estudios de toxicidad en reproducción en animales, por lo que se debe evitar su empleo durante el embarazo y administrarse únicamente si se considera claramente necesario [e84ad7c745-0020].\n\nPara la **furosemida**, se describe el riesgo de que atraviese la barrera placentaria y no deba administrarse durante el embarazo a menos que existan razones médicas que lo requieran. Además, la furosemida pasa a la leche materna y puede inhibir la lactancia, por lo que las mujeres no deben amamantar mientras estén en tratamiento con furosemida [b3c905b83e-0035].",
+      "citations": [
+        "e84ad7c745-0020",
+        "b3c905b83e-0035"
+      ],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": true
+    },
+    {
+      "question": "¿Qué condiciones de conservación y periodo de validez se establecen para las presentaciones de clindamicina y fluconazol?",
+      "answer": "Para las presentaciones de clindamicina, el texto proporcionado no incluye información específica sobre condiciones de conservación y periodo de validez. Sin embargo, para el fluconazol, se establece que la solución para perfusión debe usarse inmediatamente desde el punto de vista microbiológico, y si no se usa inmediatamente, los tiempos y condiciones de conservación en-uso son responsabilidad del usuario. Además, el periodo de validez del fluconazol es de 18 meses [f4186ec002-0070]. No se proporciona información sobre condiciones de conservación para la clindamicina.",
+      "citations": [
+        "f4186ec002-0070"
+      ],
+      "invented": [],
+      "retrieved_has_gold": false,
+      "cites_gold": false
+    },
+    {
+      "question": "¿Qué precauciones se recomiendan al administrar nitroglicerina y dobutamina a pacientes con alteraciones cardiovasculares?",
+      "answer": "Al administrar nitroglicerina y dobutamina a pacientes con alteraciones cardiovasculares, se recomiendan las siguientes precauciones:\n\n1. **Nitroglicerina**:\n   - No deben utilizarse concomitantemente con agonistas de la guanilatociclasa soluble (GCs) como el riociguat, ya que puede potenciar el efecto hipotensivo de la nitroglicerina (vasodilatación).\n   - Se recomienda no administrar ergotamina o fármacos relacionados a pacientes que estén recibiendo nitroglicerina, ya que la dihidroergotamina puede antagonizar el efecto de la nitroglicerina y provocar vasoconstricción coronaria y angina de pecho.\n   - El tratamiento concomitante con medicamentos vasodilatadores, antihipertensivos, antidepresivos tricíclicos y neurolépticos puede potenciar el efecto hipotensor de la nitroglicerina, lo que puede requerir ajustar la dosis de alguno de los medicamentos.\n   - La ingestión de ácido acetilsalicílico y otros antiinflamatorios no esteroides puede disminuir la respuesta terapéutica a la nitroglicerina y aumentar sus efectos hemodinámicos.\n   - La nitroglicerina puede interferir con el efecto anticoagulante de la heparina, disminuyendo su eficacia.\n\n2. **Dobutamina**:\n   - La dobutamina puede provocar angina de pecho en pacientes con cardiopatía isquémica, por lo que estos pacientes serán objeto de estrecha vigilancia.\n   - La dobutamina puede acelerar o exacerbar la actividad ectópica ventricular, y en casos raros ha provocado taquicardia o fibrilación ventricular.\n   - La dobutamina aumenta la conducción atrioventricular y los pacientes con aleteo auricular o fibrilación a menudo pueden desarrollar una respuesta ventricular rápida.\n   - En caso de aumento indebido de la frecuencia cardíaca o la presión arterial sistólica, o si se precipita una arritmia, se debe reducir la dosis de dobutamina o suspender temporalmente la administración del medicamento.\n   - Durante el tratamiento con dobutamina, deben controlarse estrechamente la frecuencia y el ritmo cardíacos, la presión arterial y la velocidad de perfusión. Al iniciar el tratamiento con dobutamina, se recomienda la monitorización electrocardiográfica hasta que se obtenga una respuesta estable.\n   - La dobutamina debe usarse con particular precaución en caso de hipotensión grave con shock cardiogénico (presión arterial media inferior a 70 mm Hg). Si se produce un descenso rápido de la presión arterial, disminuir la dosis o detener la perfusión facilita un retorno a los valores iniciales de presión arterial.\n\nEstas precauciones se basan en las informaciones proporcionadas en [35338e7823-0017], [35338e7823-0018], [0f15e47eed-0023], y [0f15e47eed-0027].",
+      "citations": [
+        "35338e7823-0017",
+        "35338e7823-0018",
+        "0f15e47eed-0023",
+        "0f15e47eed-0027"
+      ],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": true
+    },
+    {
+      "question": "¿Qué diferencias existen entre las indicaciones terapéuticas del cloruro de potasio y el sulfato de magnesio intravenosos?",
+      "answer": "Las diferencias entre las indicaciones terapéuticas del cloruro de potasio y el sulfato de magnesio intravenosos son las siguientes:\n\n1. **Indicaciones del cloruro de potasio**:\n   - Tratamiento de la deficiencia de potasio, especialmente cuando se asocia con alcalosis hipoclorémica.\n   - Suplemento de potasio como parte de la nutrición parenteral.\n\n   [ee0ae7c744-0003]\n\n2. **Indicaciones del sulfato de magnesio**:\n   - Tratamiento de taquicardia ventricular con torsade de pointes.\n   - Tratamiento de hipomagnesemia, con dosis específicas según la gravedad y la duración del tratamiento.\n\n   [daf29b9941-0003]\n\nEn resumen, el cloruro de potasio se utiliza principalmente para suplementar potasio en casos de deficiencia, mientras que el sulfato de magnesio se emplea para tratar condiciones específicas como la taquicardia ventricular y la hipomagnesemia.",
+      "citations": [
+        "ee0ae7c744-0003",
+        "daf29b9941-0003"
+      ],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": true
+    },
+    {
+      "question": "¿Qué antivírico intravenoso está indicado en las infecciones por virus del herpes simple y por varicela zóster en pacientes inmunodeprimidos?",
+      "answer": "El antivírico intravenoso indicado en las infecciones por virus del herpes simple y por varicela-zóster en pacientes inmunodeprimidos es el aciclovir. Esto se basa en la información proporcionada, que indica que el aciclovir está indicado para el tratamiento de pacientes inmunodeprimidos con infecciones por virus varicela-zóster [4562783e1d-0002]. Además, la posología para niños inmunodeprimidos con infecciones por virus varicela-zóster especifica una dosis de 500 mg/m² de superficie corporal cada 8 horas [4562783e1d-0005].",
+      "citations": [
+        "4562783e1d-0002",
+        "4562783e1d-0005"
+      ],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": true
+    },
+    {
+      "question": "¿Qué sedante intravenoso tiene como antídoto el flumazenilo en caso de sobredosis grave?",
+      "answer": "El sedante intravenoso cuyo antídoto es el flumazenilo en caso de sobredosis grave es la benzodiazepina. El flumazenilo está indicado en caso de intoxicación grave acompañada de coma o depresión respiratoria, como se menciona en [2e4de1175a-0065].",
+      "citations": [
+        "2e4de1175a-0065"
+      ],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": true
+    },
+    {
+      "question": "¿Qué medicamento está indicado en el tratamiento de emergencia de las reacciones alérgicas graves o anafilaxia?",
+      "answer": "El medicamento indicado en el tratamiento de emergencia de las reacciones alérgicas graves o anafilaxia es la **adrenalina**. Esto se menciona en la sección 4.1 de la información proporcionada, donde se indica que \"Adrenalina Level está indicada en las siguientes situaciones: ... - Alivio rápido de reacciones alérgicas a fármacos o a otras sustancias. - Tratamiento de emergencia del shock anafiláctico.\" [6ff73b3a35-0002].",
+      "citations": [
+        "6ff73b3a35-0002"
+      ],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": true
+    },
+    {
+      "question": "¿Qué anestésico general intravenoso puede provocar alucinaciones al despertar de la anestesia?",
+      "answer": "El anestésico general intravenoso que puede provocar alucinaciones al despertar de la anestesia es el ketamina, según la información proporcionada en el documento [4a22951867-0021], donde se menciona que \"en aproximadamente un 12% de los pacientes se presentan reacciones de salida del estado de anestesia. Las manifestaciones psicológicas pueden variar en severidad entre estados placenteros parecidos al sueño, imágenes vívidas, alucinaciones, pesadillas y delirio de salida (a menudo consistente en sensaciones disociativas o de flotación).\"",
+      "citations": [
+        "4a22951867-0021"
+      ],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": true
+    },
+    {
+      "question": "¿Qué antiarrítmico intravenoso contiene yodo y obliga a vigilar la función tiroidea del paciente?",
+      "answer": "El antiarrítmico intravenoso que contiene yodo y obliga a vigilar la función tiroidea del paciente es la amiodarona. Esto se debe a que la amiodarona contiene yodo, lo cual puede interferir en la captación de yodo marcado, y además, puede causar disfunción tiroidea como contraindicación [4b5b761581-0006].",
+      "citations": [
+        "4b5b761581-0006"
+      ],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": true
+    },
+    {
+      "question": "¿Qué analgésico y antipirético inyectable tiene como advertencia principal el riesgo de agranulocitosis?",
+      "answer": "El analgésico y antipirético inyectable que tiene como advertencia principal el riesgo de agranulocitosis es el metamizol, cuya información se encuentra en el documento [cc623ee4ba-0013]. Este medicamento puede causar agranulocitosis, que puede ser mortal, y es una reacción adversa idiosincrática que no depende de la dosis y puede aparecer en cualquier momento durante el tratamiento.",
+      "citations": [
+        "cc623ee4ba-0013"
+      ],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": true
+    },
+    {
+      "question": "¿Qué catecolamina intravenosa está contraindicada en pacientes con feocromocitoma o con taquiarritmias?",
+      "answer": "La catecolamina intravenosa que está contraindicada en pacientes con feocromocitoma o con taquiarritmias es la dobutamina. Esto se debe a que la dobutamina puede aumentar significativamente la presión arterial y la frecuencia cardíaca, junto con un mayor riesgo de arritmia en estos pacientes [0f15e47eed-0032]. Además, la adrenalina también está contraindicada en pacientes con feocromocitoma [6ff73b3a35-0011]. Sin embargo, el texto específico que menciona la contraindicación por taquiarritmias es el relacionado con la dobutamina.",
+      "citations": [
+        "0f15e47eed-0032",
+        "6ff73b3a35-0011"
+      ],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": false
+    },
+    {
+      "question": "¿Qué solución intravenosa se utiliza para corregir la acidosis metabólica y para alcalinizar la orina en algunas intoxicaciones?",
+      "answer": "La solución intravenosa utilizada para corregir la acidosis metabólica y para alcalinizar la orina en algunas intoxicaciones es el **bicarbonato sódico**. Este medicamento está indicado para el tratamiento de acidosis metabólicas agudas graves, ya sean causadas por una pérdida de bicarbonato o por acumulación de un ácido [82d84e405c-0002]. Además, se emplea para alcalinizar la orina en el tratamiento de intoxicaciones agudas de ciertos fármacos, como los barbitúricos o los salicilatos, con el fin de disminuir la reabsorción renal del tóxico [82d84e405c-0002].",
+      "citations": [
+        "82d84e405c-0002"
+      ],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": true
+    },
+    {
+      "question": "¿cuánto me dura la vancomicina ya preparada?",
+      "answer": "La duración de la vancomicina ya preparada no se especifica directamente en los textos proporcionados. Sin embargo, se menciona que la vancomicina debe administrarse por infusión intravenosa de forma lenta, de al menos una hora de duración o a una velocidad máxima de 10 mg/min (lo que sea más prolongado) [c4e87629e9-0022]. Esto sugiere que la infusión debe durar al menos una hora, pero no indica la duración total del tratamiento. Para obtener información más precisa, se debe consultar la sección 6.6 que describe la preparación de la solución [c4e87629e9-0022].",
+      "citations": [
+        "c4e87629e9-0022"
+      ],
+      "invented": [],
+      "retrieved_has_gold": false,
+      "cites_gold": false
+    },
+    {
+      "question": "heparina sódica conservación",
+      "answer": "La información proporcionada no incluye detalles específicos sobre la conservación de la heparina sódica. Sin embargo, se menciona que la solución debe presentarse transparente y exenta de partículas visibles antes de su uso, lo cual podría ser un indicador de conservación adecuada. Para información más específica sobre conservación, se requiere consultar la ficha técnica completa o las instrucciones del laboratorio.",
+      "citations": [],
+      "invented": [],
+      "retrieved_has_gold": false,
+      "cites_gold": false
+    },
+    {
+      "question": "Paciente de 80 años con aclaramiento de creatinina de 20 mL/min, ¿tengo que reducir la dosis de levofloxacino?",
+      "answer": "Sí, tienes que reducir la dosis de levofloxacino en un paciente de 80 años con un aclaramiento de creatinina de 20 mL/min. Según la información proporcionada, en pacientes con un aclaramiento de creatinina < 50 mL/min (incluyendo hemodiálisis y DPCA), la dosis se ajusta a 125 mg/48 h [f4186ec002-0009]. Esto se debe a que el levofloxacino se elimina fundamentalmente por los riñones y en pacientes con insuficiencia renal se requiere un ajuste de dosis para evitar acumulación del fármaco.",
+      "citations": [
+        "f4186ec002-0009"
+      ],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": true
+    },
+    {
+      "question": "¿Puedo poner la amiodarona en suero fisiológico o solo en glucosado?",
+      "answer": "La amiodarona inyectable debe diluirse en dextrosa al 5% para la administración intravenosa, según la información proporcionada [4b5b761581-0023]. No se menciona específicamente que pueda usarse en suero fisiológico, pero se indica que debe diluirse en 20 ml de dextrosa al 5% para la dosis inicial en resucitación cardiopulmonar. Por lo tanto, no se puede asumir que sea compatible con suero fisiológico sin más información. La dilución en dextrosa al 5% es la indicada en los protocolos mencionados.",
+      "citations": [
+        "4b5b761581-0023"
+      ],
+      "invented": [],
+      "retrieved_has_gold": false,
+      "cites_gold": false
+    },
+    {
+      "question": "¿Se puede administrar ciprofloxacino intravenoso en inyección rápida en bolo, en un minuto?",
+      "answer": "No, según la información proporcionada, el ciprofloxacino no se administra en inyección rápida en bolo en un minuto. El ciprofloxacino debe administrarse por perfusión intravenosa, y el tiempo de perfusión varía según la dosis: para 400 mg, el tiempo de perfusión es de 60 minutos, y para 200 mg, es de 30 minutos. Además, se menciona que una perfusión lenta en una vena de gran tamaño reduce las molestias del paciente y el riesgo de irritación venosa [ecd33fe743-0018]. No hay mención de una administración en bolo rápida en un minuto.",
+      "citations": [
+        "ecd33fe743-0018"
+      ],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": true
+    },
+    {
+      "question": "¿Se puede administrar amikacina durante el embarazo sin ningún riesgo para el feto?",
+      "answer": "No se puede administrar amikacina durante el embarazo sin riesgo para el feto. Aunque no se han comunicado datos secundarios graves en fetos o recién nacidos de madres tratadas con amikacina, existe el potencial de riesgo. Se han realizado estudios de reproducción en ratas y monos, que indican que no hay evidencia de alteración de la fertilidad o daño fetal debido a amikacina. No se han realizado estudios bien controlados en mujeres embarazadas, pero la experiencia no incluye evidencia alguna positiva de efectos secundarios en el feto. A pesar de que su uso no es recomendable en mujeres embarazadas, el beneficio terapéutico a alcanzar puede ser eventualmente superior al riesgo potencial teratógeno, pudiendo estar justificado su uso en tales casos, siempre bajo un riguroso control clínico [1d57fa5f18-0035].",
+      "citations": [
+        "1d57fa5f18-0035"
+      ],
+      "invented": [],
+      "retrieved_has_gold": false,
+      "cites_gold": false
+    },
+    {
+      "question": "¿Puede un paciente en tratamiento con metronidazol intravenoso tomar alcohol sin ningún problema?",
+      "answer": "No, un paciente en tratamiento con metronidazol intravenoso no puede tomar alcohol sin ningún problema. La ingesta de bebidas alcohólicas debe evitarse durante el tratamiento con metronidazol, ya que pueden producirse reacciones adversas como mareos y vómitos (efecto disulfiram) [e82830b755-0030]. Este efecto es independientemente de la vía de administración del metronidazol (oral o intravenoso).",
+      "citations": [
+        "e82830b755-0030"
+      ],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": true
+    },
+    {
+      "question": "Un vial de imipenem/cilastatina de 500 mg/500 mg se prepara en el volumen de solución de perfusión que indica la ficha. ¿Qué concentración de imipenem, en mg/mL, resulta?",
+      "answer": "La concentración de imipenem en la solución reconstituida es de aproximadamente 5 mg/mL. Este valor se obtiene según la información proporcionada en la sección [d37f178e35-0047] y [d37f178e35-0050], donde se indica que la concentración de la solución reconstituida es de aproximadamente 5 mg/mL para imipenem como para cilastatina.",
+      "citations": [
+        "d37f178e35-0047",
+        "d37f178e35-0050"
+      ],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": true
+    },
+    {
+      "question": "Un paciente de 70 kg recibe la dosis diaria mínima de gentamicina que indica la ficha técnica para adultos con función renal normal. ¿Cuántos mg de gentamicina recibe al día?",
+      "answer": "La dosis diaria recomendada en adultos y adolescentes con función renal normal es de 3 a 6 mg/kg de peso corporal por día [cd3276205b-0005]. Para un paciente de 70 kg, la dosis diaria mínima sería de 3 mg/kg × 70 kg = 210 mg al día. Por lo tanto, el paciente recibe 210 mg de gentamicina al día [cd3276205b-0005].",
+      "citations": [
+        "cd3276205b-0005"
+      ],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": true
+    },
+    {
+      "question": "Según la concentración de la solución de ciprofloxacino para perfusión, ¿cuántos mL hay que administrar para dar una dosis de 400 mg?",
+      "answer": "Según la información proporcionada, cada 100 ml de solución para perfusión de ciprofloxacino contienen 200 mg de ciprofloxacino [ecd33fe743-0001]. Por lo tanto, la concentración de la solución es de 2 mg/ml (200 mg/100 ml).\n\nPara administrar una dosis de 400 mg, se necesitan:\n\n400 mg ÷ 2 mg/ml = 200 ml.\n\nAsí, se deben administrar 200 mL de la solución para perfusión de ciprofloxacino.",
+      "citations": [
+        "ecd33fe743-0001"
+      ],
+      "invented": [],
+      "retrieved_has_gold": true,
+      "cites_gold": true
+    }
+  ],
+  "unanswerable": [
+    {
+      "question": "¿Cuál es la dosis habitual de omeprazol intravenoso?",
+      "answer": "La información proporcionada no incluye datos sobre la dosis habitual de omeprazol intravenoso. Los pasajes recuperados abordan la posología y forma de administración de medicamentos como dobutamina, linezolid, furosemida y metamizol, pero no mencionan específicamente el omeprazol. Por lo tanto, no es posible responder a la pregunta con los datos disponibles.",
+      "citations": []
+    },
+    {
+      "question": "¿Qué dosis de metformina se recomienda en diabetes tipo 2?",
+      "answer": "La información proporcionada no incluye datos sobre la dosis de metformina para el tratamiento de la diabetes tipo 2. Los documentos recuperados abordan la posología de medicamentos como metamizol, dobutamina, meropenem y furosemida, pero no mencionan la metformina. Por lo tanto, no es posible responder a la pregunta con los datos disponibles.",
+      "citations": []
+    },
+    {
+      "question": "¿Cuáles son las contraindicaciones de la atorvastatina?",
+      "answer": "La información proporcionada no incluye directamente las contraindicaciones de la atorvastatina. Sin embargo, se menciona que la atorvastatina es un sustrato del CYP3A4 y de la glicoproteína P, y se advierte precaución en pacientes que toman azitromicina y estatinas debido a la posibilidad de rabdomiólisis. Para obtener las contraindicaciones específicas de la atorvastatina, se requiere información adicional no proporcionada en los pasajes citados.",
+      "citations": []
+    },
+    {
+      "question": "¿Cómo se ajusta la warfarina según el INR?",
+      "answer": "La warfarina se ajusta según el INR (International Normalized Ratio) para mantenerlo dentro de un rango terapéutico seguro. El INR es un indicador que mide la actividad anticoagulante de la warfarina y se utiliza para regular la dosis del medicamento. Un INR demasiado alto puede aumentar el riesgo de hemorragias, mientras que un INR demasiado bajo puede no ser efectivo para prevenir embolias.\n\nSegún la información proporcionada, se recomienda monitorear el INR frecuentemente durante y poco después de la administración simultánea de antibióticos con un agente anticoagulante oral, como la warfarina, debido al riesgo de que los antibióticos potencien sus efectos anticoagulantes [d37f178e35-0027]. Además, la combinación de la warfarina con amiodarona puede potenciar el efecto anticoagulante, lo que requiere una monitorización más frecuente del INR y posiblemente un ajuste de las dosis de los anticoagulantes orales [4b5b761581-0034].\n\nEn general, el ajuste de la warfarina se basa en mantener el INR en un rango objetivo, generalmente entre 2,0 y 3,0 para la mayoría de los pacientes, aunque este rango puede variar según la condición médica del paciente. El médico o farmacólogo supervisa el INR y ajusta la dosis de la warfarina para mantenerlo en este rango terapéutico.",
+      "citations": [
+        "d37f178e35-0027",
+        "4b5b761581-0034"
+      ]
+    },
+    {
+      "question": "¿Cuál es la dosis pediátrica de diazepam rectal?",
+      "answer": "La pregunta se centra en la dosis pediátrica de diazepam rectal, pero el texto proporcionado no contiene información específica sobre la dosis de diazepam rectal para niños. Sin embargo, se proporciona información sobre la dosis de midazolam rectal para niños, que es un medicamento diferente. \n\nLa información disponible indica que para la administración rectal de midazolam en niños mayores de 6 meses, la dosis total suele variar entre 0,3 y 0,5 mg/kg [2e4de1175a-0015]. No hay información sobre la dosis de diazepam rectal en niños en los documentos proporcionados.\n\nPor lo tanto, no hay suficiente información para responder a la pregunta sobre la dosis pediátrica de diazepam rectal.",
+      "citations": [
+        "2e4de1175a-0015"
+      ]
+    },
+    {
+      "question": "¿Cuánto cuesta una ampolla de vancomicina en farmacia?",
+      "answer": "La información proporcionada no incluye ningún dato sobre el costo de una ampolla de vancomicina en una farmacia. Por lo tanto, no es posible determinar el precio basándonos en los pasajes proporcionados.",
+      "citations": []
+    },
+    {
+      "question": "¿Quién descubrió la penicilina y en qué año?",
+      "answer": "La información proporcionada no incluye ningún dato sobre quién descubrió la penicilina ni el año en que ocurrió el descubrimiento. Los textos recuperados se centran en advertencias, precauciones y interacciones de medicamentos como la piperacilina/tazobactam, la amoxicilina/ácido clavulánico y la amikacina, pero no mencionan historial histórico sobre el descubrimiento de la penicilina. Por lo tanto, no es posible responder a la pregunta con los datos proporcionados.",
+      "citations": []
+    },
+    {
+      "question": "¿Qué dosis de insulina glargina se usa al iniciar el tratamiento?",
+      "answer": "La información proporcionada no incluye ninguna referencia a la dosis de insulina glargina al iniciar el tratamiento. Los textos recuperados abordan la posología de medicamentos como gentamicina, amiodarona, enoxaparina, furosemida y dobutamina, pero no mencionan específicamente la dosis de insulina glargina. Por lo tanto, no es posible responder a la pregunta con los datos disponibles.",
+      "citations": []
+    }
+  ]
+}
