@@ -650,3 +650,1779 @@ No encontramos evidencia de reward hacking en `grpo_sin_kl`. En los cinco fallos
 Limitaciones: el filtro solo detecta los huecos que identificamos en `rewards.py`; un hack distinto no se detectaría. 
 
 ---
+
+### 2026-10-14 · Fase 1 · Test fuera de distribución (OOD): SFT frente a GRPO sin KL
+
+**Qué queríamos saber.** Cuánto empeoran el SFT y el mejor modelo de GRPO (sin KL, 8
+generaciones) cuando los problemas son de una familia que no aparece en train, y si GRPO se
+degrada menos que el SFT (la idea de "SFT memoriza, RL generaliza").
+
+**Qué hicimos.** Evaluamos los dos modelos con `rlm.evaluate` (generación greedy, máximo 1024
+tokens nuevos) sobre `rlm/data/test_ood.jsonl`: 100 problemas, 50 de `infusion` (de dosis en
+mcg/kg/min a velocidad en mL/h) y 50 de `infusion_inverse` (de velocidad a dosis en
+mcg/kg/min). Ninguna de las dos familias está en train ni en test, y los 100 problemas son de
+nivel 4 (train y test solo llegan al nivel 3). Lo comparamos con el pass@1 en test (200
+problemas) que ya teníamos en `reports/phase1_eval.json`.
+
+```bash
+uv run python -m rlm.evaluate --data rlm/data/test_ood.jsonl \
+  --adapters sft=rlm/weights/sft_lora grpo_sin_kl=rlm/weights/final_rlm_lora_sin_kl \
+  --out reports/phase1_eval_ood.json --history reports/phase1_pass1_ood.png
+uv run python -m rlm.compare_ood --rescore --models sft grpo_sin_kl
+```
+
+`rlm/compare_ood.py` calcula el pass@1 con intervalo de Wilson al 95 %, la caída entre test y OOD
+con intervalo de Newcombe, y compara los dos modelos sobre los mismos problemas con un test de
+signos exacto (solo cuentan los problemas que resuelve uno de los dos).
+
+**Un fallo del verificador que cambió el resultado.** La primera medida dio 20,0 % (SFT) y 27,0 %
+(GRPO), con `infusion_inverse` en 0/50 para los dos. Al revisar los casos de "valor correcto,
+unidad incorrecta" vimos que varios tenían la unidad escrita igual que la esperada
+(`0.31 mcg/kg/min`). La causa: `normalize_unit("mcg/kg/min")` devolvía `None` y
+`extract_final_unit` solo reconocía unidades simples, así que `units_equivalent` daba `False`
+para cualquier respuesta en esa unidad, fuera correcta o no. Lo arreglamos en `rlm/rewards.py`
+(17 líneas: reconoce `mcg/kg/min` con las grafías `mcg`, `µg`, `μg` y `ug`) y añadimos
+`tests/test_units.py`. Antes de darlo por bueno comprobamos que no cambia nada de lo anterior:
+de las 849 respuestas guardadas en test (los cinco modelos evaluados, con bloque `<answer>`),
+ninguna cambia de veredicto de unidad, y las unidades de train (`mL`, `mL/h`, `mg`,
+`gotas/min`, con sus alias) se normalizan igual que antes; por eso los modelos entrenados y sus
+resultados en test no se ven afectados. Las respuestas OOD ya generadas se puntuaron de nuevo
+con `--rescore`, sin volver a generar.
+
+**Qué pasó.** Con el verificador corregido:
+
+| Modelo | Test | OOD | Caída (puntos) |
+|---|---|---|---|
+| sft | 80,5 % [74,5; 85,4] (161/200) | 24,0 % [16,7; 33,2] (24/100) | +56,5 [45,5; 65,3] |
+| grpo_sin_kl | 89,5 % [84,5; 93,0] (179/200) | 30,0 % [21,9; 39,6] (30/100) | +59,5 [48,7; 68,3] |
+
+El repuntuado no cambia ningún veredicto en test (0 de 200 en ambos modelos) y en OOD pasan a
+correctas 4 respuestas del SFT y 3 de GRPO (ninguna pasa a incorrecta): los valores antes de
+corregir eran 20/100 y 27/100.
+
+| Familia (OOD) | n | sft | grpo_sin_kl |
+|---|---|---|---|
+| infusion | 50 | 20/50 (40,0 %) | 27/50 (54,0 %) |
+| infusion_inverse | 50 | 4/50 (8,0 %) | 3/50 (6,0 %) |
+
+| Tipo de resultado (OOD) | ok | valor correcto, unidad mal | valor mal | sin respuesta | formato válido |
+|---|---|---|---|---|---|
+| sft | 24 | 3 | 33 | 40 | 60,0 % |
+| grpo_sin_kl | 30 | 4 | 31 | 35 | 65,0 % |
+
+- Las 40 y 35 respuestas "sin respuesta" llegan todas al límite de 1024 tokens: no terminan.
+  En los ejemplos que leímos, el modelo se enreda ("¿Qué es el error?") y sigue razonando.
+- Las 7 respuestas con el valor correcto y la unidad mal son errores reales, no del verificador:
+  contestan en `µg/min` o `mcg/min`, sin el `/kg`.
+- De los fallos leídos a mano (seis), el SFT convierte mal ("5 mg es 5 mL") y en
+  `infusion_inverse` multiplica por el peso en vez de dividir; GRPO comete errores de
+  conversión (escribe 0,1 µg/kg/min como 0,001 mg/kg/min) o se queda sin tokens.
+- Comparación pareada en OOD: solo el SFT acierta 9 problemas, solo GRPO 15, ambos 15 y ninguno
+  61 (p = 0,307). En test eran 6 y 24 (p = 0,001).
+
+**Qué concluimos.**
+
+- Los dos modelos fallan mucho en la familia nueva: caen unos 57 y 60 puntos, y los intervalos
+  de las dos caídas se solapan casi por completo. No podemos decir que GRPO se degrade menos.
+- GRPO queda por encima del SFT también en OOD (30,0 % frente a 24,0 %), en la misma dirección
+  que en test, pero con 100 problemas la diferencia no es significativa (p = 0,307). La ventaja
+  fue clara en test (p = 0,001) y aquí no se sostiene. El experimento ni apoya ni descarta que
+  "RL generaliza": la evidencia es débil y ruidosa.
+- No podemos separar qué causa la caída, porque el OOD cambia varias cosas a la vez: la familia,
+  el sistema de unidades (mcg/kg/min no aparece en ningún problema de train, ni en las trazas
+  del SFT) y el nivel (todos son de nivel 4). Además, el 35-40 % de las respuestas no termina
+  en 1024 tokens, así que "no sabe" y "no acaba" se mezclan. Entre las respuestas que sí
+  terminan, aciertan 24/60 (SFT) y 30/65 (GRPO); es un dato descriptivo, no una comparación
+  limpia.
+- Limitaciones: 100 problemas; una sola generación greedy por problema; una sola semilla de
+  entrenamiento por modelo. `reports/phase1_eval_ood.json` guarda los veredictos del momento
+  de generar (20/100 y 27/100), y el gráfico `phase1_pass1_ood.png` que genera `rlm.evaluate`
+  los refleja, pero ese gráfico está en el `.gitignore` y no se sube al repositorio. Las cifras
+  corregidas son las de esta entrada y las de `reports/ood_comparison.md`, que sí se suben.
+- Siguientes pasos posibles, sin hacer: un OOD más suave con `--ood-mode weight` (mismas
+  familias, pesos de 2 a 9,9 kg) para ver una degradación que no sea total; repetir con más
+  tokens para separar los fallos por truncado; y más problemas por conjunto.
+
+---
+
+### 2026-10-25 · Fase 2 · Elección de las herramientas
+ 
+**Qué queríamos saber.** Qué tres herramientas (consulta externa, cálculo y acción) encajan con
+nuestro dominio, que es ayudar a estudiantes de Enfermería con cálculo de medicación, y si el
+plan de la propuesta seguía valiendo.
+ 
+**Qué hicimos.** Partimos de la propuesta: CIMA REST y PubChem PUG REST para consultar, Pint para
+calcular y una hoja de preparación en PDF como acción. Comprobamos los endpoints y los campos de
+CIMA contra su documentación oficial (`CIMA_REST_API.pdf`) antes de escribir la
+herramienta: `GET /medicamentos?practiv1=...&comerc=1` devuelve en una sola petición el nombre,
+la dosis o concentración (`dosis`), la forma farmacéutica y las vías de administración. Valoramos
+también openFDA como alternativa.
+ 
+Herramientas que quedan en `tool_use/tools.py`:
+ 
+| Tipo | Herramienta | Qué hace |
+|---|---|---|
+| Consulta externa | `search_medication_cima` | Presentaciones comercializadas de un principio activo (CIMA, AEMPS) |
+| Cálculo | `convert_units` | Conversión de unidades con Pint (añadimos el alias `mcg`) |
+| Cálculo | `dose_calculator` | Multiplicaciones y divisiones exactas (ver la entrada siguiente) |
+| Acción | `create_preparation_sheet` | Genera un PDF con medicamento, concentración, dosis, volumen o velocidad y pasos del cálculo; `requires_confirmation=True` |
+ 
+**Qué pasó.** Descartamos dos cosas de la propuesta:
+ 
+- **PubChem.** Su dato útil (fórmula y masa molecular) solo sirve en problemas con mmol o mEq, que
+  no están en nuestro dataset. El enunciado pide una herramienta de consulta externa, no dos, y
+  cada herramienta de más es una opción más entre las que el modelo puede equivocarse.
+- **openFDA.** Devuelve prosa en inglés sobre la posología, no concentraciones estructuradas, y
+  estamos trabajando con medicamentos comercializados en España.
+Tampoco usamos `get_weather` ni `calculator` del ejemplo: los quitamos del registro porque
+`calculator` se solapaba con `dose_calculator` y habría confundido la selección.
+ 
+**Qué concluimos.** En los problemas de nuestro dataset el fármaco ya viene dado, así que la
+consulta a CIMA no es imprescindible para resolverlos. Su papel es dar la presentación y la
+concentración reales cuando la petición no las incluye. Esto lo comprobaremos en el banco de
+pruebas con casos de ambos tipos. Si el modelo apenas la usa, lo contaremos en la interpretación.
+ 
+---
+
+### 2026-10-25 · Fase 2 · Una calculadora de dosis, porque el modelo falla en las divisiones
+ 
+**Qué queríamos saber.** Si merecía la pena una herramienta de cálculo dedicada además de Pint, y
+cómo debía ser para que el modelo la use justo donde falla.
+ 
+**Qué hicimos.** Partimos del análisis de fallos de la fase 1 (entrada del 2026-10-13): de los 5
+fallos de `grpo_sin_kl` que leímos completos, 4 eran errores aritméticos y solo 1 conceptual.
+El modelo plantea bien la operación y la ejecuta mal, sobre todo en divisiones con decimales:
+ 
+- 490 / 11,75 lo da como 41,2 (correcto: 41,7).
+- 40200 / 495 lo da como 81,666 (correcto: 81,21).
+- 370 / 2,75 le da cada vez un valor distinto y agota los 1024 tokens sin escribir `<answer>`.
+Por eso escribimos `dose_calculator(expression, decimals=2)`:
+ 
+- Aritmética exacta con `Fraction`, el mismo criterio que el generador de problemas de la fase 1
+  (`0.1 * 3` da exactamente `0.3`, sin error de coma flotante).
+- Redondeo half-up, igual que el verificador. El `round` de Python redondea half-even y daría
+  discrepancias con `MedicationVerifier`.
+- Solo acepta números y `+ - * / **` con exponente entero y menor o igual que 10. Rechaza la
+  división entre cero y cualquier otra sintaxis.
+- La docstring le dice al modelo cuándo usarla ("Always use this tool instead of calculating in
+  your head...") y da dos ejemplos de nuestro dominio (mg/kg con stock, mL/min).
+- `convert_units` (Pint) se encarga de las unidades, y `dose_calculator` de los números.
+**Qué pasó.** Todavía no lo hemos medido con el modelo. Solo comprobamos con tests que la
+herramienta calcula bien (por ejemplo, `(15 * 70) / 250 = 4.2` y `1 / 3` a tres decimales da
+`0.333`) y que rechaza la división entre cero y el código que no sea aritmética.
+ 
+**Qué concluimos.** Es una hipótesis, no un resultado: si el modelo llama a la calculadora en
+vez de dividir de cabeza, deberían desaparecer los fallos `valor_mal` por aritmética y los casos
+de `sin_answer` que vienen de bucles de recálculo (6 de 200 en test con `grpo_sin_kl`). Lo que no
+arregla es el error conceptual de unidades del caso 3 de la fase 1. Qué ocurre de verdad lo
+medimos en el banco de pruebas: tasa de llamadas a `dose_calculator` y exactitud con y sin
+herramientas.
+ 
+---
+
+### 2026-10-25 · Fase 2 · Pruebas de las herramientas sin red
+ 
+**Qué queríamos saber.** Si las herramientas funcionan y si el registro genera bien las
+definiciones antes de meter el modelo en el bucle.
+ 
+**Qué hicimos.** Ampliamos `tests/test_tool_registry.py` con tests de nuestras herramientas. Miran
+dos cosas: las definiciones que ve el modelo (nombre, descripción, argumentos obligatorios y tipos)
+y la ejecución a través de `ToolRegistry.call` (llamadas válidas, argumentos inválidos, errores de
+ejecución como observaciones y el PDF). Todo corre sin red: CIMA se prueba con una respuesta
+simulada.
+ 
+```bash
+python -m pytest tests/test_tool_registry.py -v
+```
+ 
+**Qué pasó.** La primera ejecución dio fallos y varios eran errores reales de `tools.py`:
+ 
+- `convert_units` tenía mal la firma (`value_float` en lugar de `value: float`, sin tipo), de modo
+  que el esquema no declaraba el argumento como número y la función fallaba con `NameError`.
+- Faltaba la constante `SHEETS_DIR` de `create_preparation_sheet`.
+- `requires_confirmation` no se puede pasar a `ToolRegistry.register`: se declara en el
+  decorador, `@tool(requires_confirmation=True)`. Nuestro `default_registry()` tenía el error.
+- Revisando el código vimos además que Pint lanza `DimensionalityError` al convertir mg a mL, y
+  esa excepción no es un `ValueError`. La capturamos y la convertimos en un mensaje claro, para
+  que el modelo reciba una observación útil y no el texto interno de Pint.
+También aprendimos cómo funciona el registro: la docstring **completa** (incluido `Args:`) pasa a
+la descripción de la herramienta, así que el modelo sí ve las indicaciones de los argumentos
+(por ejemplo, que el principio activo va en español), y los errores llegan al modelo como
+`TipoDeError: mensaje`.
+ 
+Tras corregirlo, todos los tests pasan. Ninguno toca la API real de CIMA: las comprobamos aparte, 
+en la siguiente entrada.
+ 
+**Qué concluimos.** Las herramientas funcionan de forma aislada y sin red. Con esto no sabemos
+todavía si el modelo las elige bien, solo que, si las llama, harán lo esperado. La respuesta
+simulada de CIMA solo prueba nuestro formateo: que la API real devuelva lo que esperamos queda
+por comprobar a mano. Los tests de
+definición (`required`, tipos) sirven para detectar si un cambio en una docstring o en un tipo
+rompe el esquema que ve el modelo.
+ 
+---
+
+### 2026-10-25 · Fase 2 · Prueba de `search_medication_cima` contra la API real de CIMA
+ 
+**Qué queríamos saber.** Si CIMA responde como esperábamos desde el DGX y si lo que devuelve
+sirve de verdad para los cálculos de nuestros problemas.
+ 
+**Qué hicimos.** Cuatro consultas a mano, sin modificar la herramienta:
+ 
+```bash
+python -c "from tool_use.tools import search_medication_cima as t; print(t(active_ingredient='paracetamol', max_results=3))"
+python -c "from tool_use.tools import default_registry as d; r = d().call('search_medication_cima', {'active_ingredient': 'furosemida'}); print(r.ok, round(r.latency_ms), 'ms'); print(r.result or r.error)"
+python -c "from tool_use.tools import search_medication_cima as t; print(t(active_ingredient='paracetamol', max_results=10))"
+python -c "from tool_use.tools import default_registry as d; r = d().call('search_medication_cima', {'active_ingredient': 'xyzabc'}); print(r.ok, r.error)"
+```
+ 
+**Qué pasó.**
+ 
+- **Funciona desde el DGX.** `furosemida` devuelve 5 presentaciones a través del registro en
+  326 ms. Cada línea trae nombre, `dose`, forma farmacéutica, vías de administración y número de
+  registro.
+- **Nombre inexistente.** `xyzabc` devuelve `ok = False` con `ValueError: No marketed medicines
+  found for active ingredient 'xyzabc'`: una observación clara para el modelo.
+- **`paracetamol` con 10 resultados: las 10 presentaciones son orales** (comprimidos, granulado,
+  soluciones orales, un combinado con ibuprofeno y cafeína), ordenadas alfabéticamente. Ninguna
+  es intravenosa. CIMA no filtra por forma ni por vía y la herramienta solo mira la primera
+  página.
+- **`dose` no es la concentración.** Es la cantidad de principio activo por unidad. En
+  `FUROSEMIDA PHYSAN 20mg/2ml SOLUCIÓN INYECTABLE` dice solo `20 mg`: la concentración (10 mg/mL)
+  solo aparece en el nombre. Nuestra docstring decía que `dose` podía ser una concentración, por
+  ejemplo `10 mg/ml`, lo cual es engañoso.
+
+**Qué concluimos.** La API real funciona y la herramienta devuelve lo que esperábamos en cuanto
+a formato y latencia. Pero tiene dos limitaciones que afectan a los problemas de nuestro dominio,
+donde la presentación suele ser un inyectable o una perfusión:
+ 
+1. Una petición como "paracetamol IV" puede no encontrar su presentación, porque las primeras
+   páginas son todas orales.
+2. Para calcular un volumen, el modelo tendría que leer la concentración del nombre, no del campo
+   `dose`.
+
+Decisión de momento: **no modificamos la herramienta ni su docstring**. Soluciones posibles,
+sin implementar: un argumento opcional `form` que filtre por forma o vía recorriendo varias
+páginas, y una docstring que explique que `dose` es la cantidad por unidad. Hay que tenerlas
+presentes al montar el banco de pruebas: incluir al menos un caso donde la presentación correcta
+sea un inyectable permitirá medir si esta limitación pesa en la práctica. Si el modelo falla ahí,
+quedará documentado con esta entrada como causa probable.
+
+---
+
+### 2026-10-27 · Fase 2 · Banco de pruebas de herramientas: Qwen3-0.6B y Qwen3-1.7B, con y sin herramientas
+
+**Qué queríamos saber.** Tres cosas: si el modelo elige la herramienta correcta y le pasa los
+argumentos correctos, si las herramientas mejoran la respuesta final frente a no tenerlas, y dónde
+falla y por qué. La hipótesis de la entrada "Una calculadora de dosis" era que, con
+`dose_calculator`, desaparecerían los errores aritméticos de la fase 1.
+
+**Qué hicimos.** Un banco de 30 casos en español (`tool_use/bench/cases.jsonl`), escrito y
+revisado a mano **antes** de ejecutar y sin tocar ningún caso después de ver resultados:
+
+| Tipo | Casos | Qué se espera |
+|---|---|---|
+| Consulta CIMA | 6 | `search_medication_cima` (uno con paracetamol IV, la limitación anotada arriba) |
+| Conversión | 5 | `convert_units` |
+| Cálculo de dosis | 7 | `dose_calculator` |
+| Hoja PDF | 3 | `create_preparation_sheet` |
+| Encadenados | 3 | varias herramientas en orden (CIMA y cálculo, conversión y cálculo, cálculo y hoja) |
+| Sin herramienta | 6 | ninguna (teoría, saludo, un fármaco mencionado sin pedir datos de CIMA) |
+
+Métricas (`tool_use/evaluate.py`):
+
+- **Selección:** la primera llamada es la herramienta esperada (o no hay llamada si no hace falta).
+- **Argumentos:** se comparan por significado: las expresiones por su valor (`15*70` es `70 * 15`),
+  las unidades por conversión (`µg` es `mcg`) y los argumentos opcionales en su valor por defecto
+  cuentan como puestos. Damos dos cifras: **estricta** y **sin contar los opcionales** que el caso
+  no fija (`max_results`, `decimals`), porque elegir 10 resultados en vez de 5 no es una llamada
+  incorrecta. El campo `steps` de la hoja solo debe existir.
+- **Respuesta final:** el texto contiene el número esperado. Solo existe en los 15 casos con
+  resultado numérico (conversión, cálculo y 3 encadenados). Es una heurística: no distingue un
+  número correcto en una frase equivocada.
+- **Con y sin herramientas:** mismo modelo y mismos casos. Sin herramientas cambia el prompt de
+  sistema (una instrucción neutra) y no hay definiciones.
+
+Modelos: `Qwen/Qwen3-0.6B` y `Qwen/Qwen3-1.7B` tal cual, sin nuestro SFT ni GRPO. Decodificación
+voraz, `enable_thinking=False`, 1024 tokens máximo, 5 turnos, una sola ejecución. La hoja PDF no
+se ejecutó (`allow_side_effects=False`): el modelo recibe que requiere confirmación.
+
+```bash
+uv run python -m tool_use.evaluate --model-id Qwen/Qwen3-0.6B --out reports/phase2_eval_qwen3-0.6b.json
+uv run python -m tool_use.evaluate --model-id Qwen/Qwen3-1.7B --out reports/phase2_eval_qwen3-1.7b.json
+uv run python -m tool_use.evaluate --rescore reports/phase2_eval_qwen3-0.6b.json   # sin modelo
+```
+
+**Una corrección de la medición.** La primera puntuación aceptaba un número dentro del 0,5 %, y
+daba por buenas las respuestas "41,75" y "41,76" para 41,7 (c18): son errores aritméticos reales.
+Bajamos la tolerancia (1e-4 relativa y 0,01 absoluta, de modo que 1,6667 sigue valiendo para 1,67) y
+volvimos a puntuar los dos ficheros con `--rescore`. Solo cambió esa respuesta en la condición sin
+herramientas de cada modelo. Los JSON de `reports/` ya llevan las cifras corregidas; el
+comportamiento crudo del modelo (llamadas y respuestas) no se tocó.
+
+**Qué pasó.**
+
+| | Qwen3-0.6B | Qwen3-1.7B |
+|---|---|---|
+| Selección de herramienta (30 casos) | 73,3 % (22) | 96,7 % (29) |
+| Argumentos, estricto | 63,3 % (19) | 70,0 % (21) |
+| Argumentos, sin contar opcionales | 70,0 % (21) | 86,7 % (26) |
+| Llamadas innecesarias (6 casos sin herramienta) | 0 | 0 |
+| Llamadas omitidas / herramienta equivocada (24 casos) | 2 / 6 | 0 / 1 |
+| Secuencia completa en los 3 encadenados | 0 | 0 |
+| Respuesta final correcta **con** herramientas (15 casos) | 40,0 % (6) · IC 19,8-64,3 | 60,0 % (9) · IC 35,7-80,2 |
+| Respuesta final correcta **sin** herramientas (15 casos) | 33,3 % (5) · IC 15,2-58,3 | 73,3 % (11) · IC 48,0-89,1 |
+
+Selección y argumentos por categoría (acierto de herramienta / argumentos estricto):
+
+| Categoría | 0.6B | 1.7B |
+|---|---|---|
+| CIMA (6) | 6 / 5 | 6 / 2 |
+| Conversión (5) | 3 / 2 | 5 / 5 |
+| Cálculo (7) | 1 / 1 | 6 / 3 |
+| Hoja PDF (3) | 3 / 3 | 3 / 3 |
+| Encadenados (3) | 3 / 2 | 3 / 2 |
+| Sin herramienta (6) | 6 / 6 | 6 / 6 |
+
+Qué falla, con ejemplos (ids de `cases.jsonl`):
+
+1. **Confunde `convert_units` con `dose_calculator`.** El 0.6B usa `convert_units` en los 6 casos
+   de cálculo que fallan (c13-c18) con argumentos sin sentido: `value: "1000 mg"` (texto),
+   `mg a mL` (error de tipo de unidad) o `500 L a mL`. El 1.7B casi lo evita (6 de 7), pero lo
+   repite en c15 (`mL a mL/h`) y en el segundo paso de c23 (`mcg a mL`).
+2. **El fallo está en plantear la expresión, no en calcularla.** El 1.7B llama a
+   `dose_calculator`, que calcula exacto, pero con la expresión mal planteada: multiplica en vez
+   de dividir (c14, `0.5 * 12 * 2.5`), olvida pasar a minutos (c16, `500 / 8`) o no multiplica por
+   los mL de la ampolla (c17, `40 / 20`). En c13 la herramienta devuelve `100.0` y el modelo
+   contesta "1000 mL", en inglés.
+3. **Tras un error de herramienta, nunca prueba otra herramienta.** De 6 llamadas con error
+   (4 del 0.6B y 2 del 1.7B), ninguna va seguida de una llamada correcta. El 1.7B se recupera
+   calculando él mismo y acierta (c15, c23); el 0.6B se rinde (c13, c14, c17), calcula mal solo
+   (c18) o da por buena una salida absurda: 500000 mL/h en c15 y c16.
+4. **CIMA: elige bien y lee regular.** Con paracetamol IV (c05) la lista es toda oral. El 0.6B
+   responde que la presentación intravenosa es un comprimido efervescente; el 1.7B nota que son
+   orales ("no se menciona una presentación intravenosa directamente"). En c22 ambos piden
+   `max_results: 1`, reciben una sola presentación oral de furosemida y nunca llegan a calcular.
+   El 1.7B elige `max_results` distinto cada vez (10, 5, 3, 1), y por eso la cifra estricta de
+   CIMA baja a 2/6 aunque las 6 llamadas son razonables.
+5. **Ningún encadenado se completa.** c22 se para tras CIMA; en c23 el 0.6B llama a CIMA en vez de
+   a la calculadora y el 1.7B repite `convert_units` (`mcg a mL`); en c24 el 0.6B se para tras el
+   primer cálculo y el 1.7B se salta el cálculo del volumen y se inventa "500 mg, 10 mL" (esperado:
+   12,5 mL; la hoja no se ejecutó).
+6. **Con y sin herramientas.** Por categoría, las herramientas ayudan en conversión (0.6B: 4/5 frente
+   a 2/5; 1.7B: 5/5 frente a 4/5) y **perjudican en cálculo** (0.6B: 1/7 frente a 3/7; 1.7B: 3/7
+   frente a 5/7). Caso a caso, el 1.7B gana con herramientas en 2 casos (c11, una conversión que
+   el texto no resuelve, y c18, donde la calculadora da 41,7 y sin ella 41,76) y pierde en 4
+   (c13, c14, c17, c24). El 0.6B gana en 4 (c08, c11, c12, c24) y pierde en 3 (c13, c14, c15); en
+   c08 no llamó a ninguna herramienta, así que esa diferencia viene del prompt y no de la
+   herramienta. Un test de signos da p = 0,69 (1.7B) y p = 1,0 (0.6B): no hay evidencia de efecto.
+
+**Qué concluimos.**
+
+- **Tamaño.** El paso de 0.6B a 1.7B mejora mucho la selección (73 % a 97 %) y bastante los
+  argumentos sin contar opcionales (70 % a 87 %), pero la respuesta final con herramientas sube
+  menos de lo que sube sin ellas. A 1.7B, usar herramientas no mejora la respuesta final en nuestro
+  banco (60 % frente a 73 %, con intervalos que se solapan).
+- **La hipótesis de la calculadora se cumple solo a medias.** Cuando el modelo llama a
+  `dose_calculator`, el número es exacto (c18), pero los errores que quedan son de planteamiento,
+  que una calculadora no corrige. Hipótesis, sin comprobar: con `enable_thinking=False` el modelo
+  escribe la expresión en el primer token, sin el razonamiento paso a paso con el que acierta
+  cuando responde solo (sin herramientas explica "volumen = dosis / concentración" y sustituye).
+- **La descripción de `convert_units` puede estar atrayendo al modelo.** Dice expresamente que no
+  convierte "mg a mL" y los errores del 0.6B y de c15/c23 van justo ahí. Es una hipótesis: no
+  hemos cambiado la descripción ni repetido la prueba.
+- **Límites.** 30 casos y solo 15 con respuesta numérica: los intervalos son anchos y las
+  diferencias entre condiciones no son significativas. Los casos de cálculo son sencillos (el 1.7B
+  sin herramientas acierta 5 de 7), así que la calculadora tiene poco margen. Las respuestas de
+  CIMA y las hojas no se puntúan en el texto final. Una sola ejecución voraz por modelo, con la
+  hoja sin ejecutar. Son los modelos Qwen3 tal cual: si el profesor pide el nuestro, habría que
+  repetir con `--model-id` (hecho después: ver la entrada "Banco de herramientas con nuestro
+  modelo").
+- **Por probar.** Reescribir la descripción de `convert_units` y repetir solo los casos
+  de cálculo (hecho después, quitando los ejemplos: ver la entrada "Descripciones de las
+  herramientas sin ejemplos"); devolver en los errores de `convert_units` una pista ("para multiplicar o dividir
+  usa `dose_calculator`"); dejar razonar al modelo antes de llamar; casos de cálculo más difíciles,
+  como los de la fase 1.
+
+---
+
+### 2026-10-27 · Fase 2 · Banco de herramientas con nuestro modelo (SFT y GRPO sin KL)
+
+**Qué queríamos saber.** Si nuestro modelo de la fase 1 (Qwen3-0.6B con adaptador LoRA) usa las
+herramientas mejor que el Qwen3-0.6B del que parte. La entrada anterior se hizo con Qwen3 tal
+cual. El profesor contestó por correo que el modelo razonador debe usarse para generar las
+respuestas y guiar al agente, incluida la selección de herramientas; que es de esperar que un
+modelo ajustado a nuestro problema supere a un Qwen base; y que los Qwen del repositorio plantilla
+son solo una referencia. Teresa pidió probarlo antes de tocar `tools.py`.
+
+Hipótesis, escrita antes de ejecutar: la respuesta final mejoraría (el adaptador se entrenó
+justo en estos cálculos), pero el uso de herramientas podía empeorar, porque el adaptador solo
+vio el formato `<think>…</think><answer>…</answer>` con otro prompt de sistema y nunca una
+llamada `<tool_call>`.
+
+**Qué hicimos.** El mismo banco de 30 casos, sin tocarlo, y las mismas métricas. En
+`tool_use/evaluate.py` (sin modificar `executor.py`, que no es nuestro) añadimos:
+
+- `--adapter`: aplica el LoRA sobre el modelo base con PEFT (carpeta local o repo de Hugging
+  Face), igual que `rlm/inference.py`. `ToolLoop.load()` solo carga el base.
+- `--thinking`: deja que el modelo escriba su `<think>`. El ejecutor fuerza
+  `enable_thinking=False`, que pre-rellena un bloque de razonamiento vacío; para un modelo
+  entrenado a abrirlo él mismo eso queda fuera de su distribución.
+- `--no-tools-prompt phase1`: en la condición sin herramientas usa el prompt de la fase 1 (R1-Zero)
+  en lugar del neutro, para no penalizar al adaptador en la línea base por usarlo fuera de formato.
+- El razonamiento no cuenta como respuesta: antes de buscar el número esperado se quita el bloque
+  `<think>`. Si el bloque queda sin cerrar, se descarta todo lo que sigue a `<think>`. El resumen
+  añade `unfinished_thinking_rate` (respuestas que abren `<think>` y no lo cierran).
+
+Los JSON de Qwen3 se puntúan igual con esta versión (comprobado con `--rescore`). La suite del
+banco pasa de 27 a 34 tests.
+
+Adaptadores: SFT (`raquelfes11/dgm-arca-sft-lora`) y GRPO sin KL (`rlm/weights/final_rlm_lora_sin_kl`,
+que es `isamorell/dgm-arca-rlm-lora-sin-kl`). Decodificación voraz, 1024 tokens, 5 turnos, una sola
+ejecución, hoja PDF sin ejecutar.
+
+```bash
+uv run python -m tool_use.evaluate --adapter rlm/weights/final_rlm_lora_sin_kl --thinking \
+  --no-tools-prompt phase1 --out reports/phase2_eval_qwen3-0.6b_grpo.json
+uv run python -m tool_use.evaluate --adapter raquelfes11/dgm-arca-sft-lora --thinking \
+  --no-tools-prompt phase1 --out reports/phase2_eval_qwen3-0.6b_sft.json
+```
+
+**Qué no permite separar esta prueba.** Los Qwen3 se ejecutaron con razonamiento desactivado y prompt
+neutro, y los adaptadores con razonamiento activado y prompt de fase 1. Cambian dos cosas a la vez
+(el adaptador y el modo de razonamiento) y no podemos repartir el efecto entre ellas.
+
+**Qué pasó.**
+
+| | Qwen3-0.6B | Qwen3-1.7B | 0.6B + SFT | 0.6B + GRPO sin KL |
+|---|---|---|---|---|
+| Selección de herramienta (30 casos) | 73,3 % (22) | 96,7 % (29) | 60,0 % (18) | 56,7 % (17) |
+| Argumentos, estricto | 63,3 % (19) | 70,0 % (21) | 50,0 % (15) | 46,7 % (14) |
+| Argumentos, sin contar opcionales | 70,0 % (21) | 86,7 % (26) | 50,0 % (15) | 50,0 % (15) |
+| Llamadas innecesarias (6 casos sin herramienta) | 0 | 0 | 0 | 0 |
+| Llamadas omitidas / herramienta equivocada (24 casos) | 2 / 6 | 0 / 1 | 11 / 1 | 10 / 3 |
+| Secuencia completa en los 3 encadenados | 0 | 0 | 0 | 1 |
+| Respuesta final **con** herramientas (15 casos) | 40,0 % (6) · IC 19,8-64,3 | 60,0 % (9) · IC 35,7-80,2 | 73,3 % (11) · IC 48,0-89,1 | 66,7 % (10) · IC 41,7-84,8 |
+| Respuesta final **sin** herramientas (15 casos) | 33,3 % (5) · IC 15,2-58,3 | 73,3 % (11) · IC 48,0-89,1 | 80,0 % (12) · IC 54,8-93,0 | 80,0 % (12) · IC 54,8-93,0 |
+| `<think>` sin cerrar (con / sin herramientas, de 30) | no aplica | no aplica | 5 / 4 | 5 / 1 |
+
+Selección y argumentos por categoría (acierto de herramienta / argumentos estricto):
+
+| Categoría | Qwen3-0.6B | Qwen3-1.7B | 0.6B + SFT | 0.6B + GRPO sin KL |
+|---|---|---|---|---|
+| CIMA (6) | 6 / 5 | 6 / 2 | 5 / 5 | 5 / 4 |
+| Conversión (5) | 3 / 2 | 5 / 5 | 3 / 1 | 2 / 1 |
+| Cálculo (7) | 1 / 1 | 6 / 3 | 0 / 0 | 0 / 0 |
+| Hoja PDF (3) | 3 / 3 | 3 / 3 | 3 / 3 | 3 / 3 |
+| Encadenados (3) | 3 / 2 | 3 / 2 | 1 / 0 | 1 / 0 |
+| Sin herramienta (6) | 6 / 6 | 6 / 6 | 6 / 6 | 6 / 6 |
+
+Comparaciones caso a caso sobre los 15 casos con respuesta numérica (test de signos exacto,
+bilateral; "+" son casos que acierta el primero y no el segundo):
+
+| Comparación | + | − | p |
+|---|---|---|---|
+| SFT sin herramientas frente a Qwen3-0.6B sin herramientas | 7 | 0 | 0,016 |
+| GRPO sin herramientas frente a Qwen3-0.6B sin herramientas | 7 | 0 | 0,016 |
+| SFT con herramientas frente a Qwen3-0.6B con herramientas | 6 | 1 | 0,125 |
+| GRPO con herramientas frente a Qwen3-0.6B con herramientas | 5 | 1 | 0,219 |
+| SFT con herramientas frente a Qwen3-1.7B con herramientas | 5 | 3 | 0,727 |
+| GRPO con herramientas frente a Qwen3-1.7B con herramientas | 5 | 4 | 1,0 |
+| GRPO frente a SFT, sin herramientas | 0 | 0 | 1,0 |
+| GRPO frente a SFT, con herramientas | 0 | 1 | 1,0 |
+
+Qué ocurre, con ejemplos (ids de `cases.jsonl`):
+
+1. **En cálculo no llama a la herramienta y lo resuelve él.** Con los dos adaptadores `dose_calculator`
+   se usa en 0 de 7 casos de cálculo, pero la respuesta final es correcta en 6 de 7 (solo falla
+   c18), con y sin herramientas. El modelo se entrenó para razonar la aritmética y la hace bien en
+   estos casos sencillos; nunca aprendió a delegarla. Es la causa de que las llamadas omitidas
+   pasen del 8 % (Qwen3-0.6B) al 42-46 %.
+2. **Sin herramientas mejora mucho frente a su base.** 12 de 15 frente a 5 de 15, con los mismos 7
+   casos a favor en los dos adaptadores (c08, c10, c12, c16, c17, c23, c24) y ninguno en contra
+   (p = 0,016: significativo incluso con 15 casos). Frente al Qwen3-1.7B, 12 frente a 11
+   (un caso, c16). Con herramientas el 0.6B + SFT queda al nivel del 1.7B (11 frente a 9, no
+   significativo) por otro camino: sin usarlas bien, mientras que el 1.7B las elige casi siempre.
+3. **El SFT y el GRPO se comportan igual.** Sin herramientas aciertan exactamente los mismos 12
+   casos; con herramientas solo difieren en c23. En la fase 1 el GRPO sin KL superaba al SFT (89,5 %
+   frente a 80,5 % en test y 30 % frente a 24 % en OOD), pero este banco no los distingue. El
+   comportamiento con herramientas viene ya del SFT o del formato, no del GRPO.
+4. **`convert_units` falla en la validación, por tres causas.** Con el SFT fallan 5 de 5 llamadas
+   y con el GRPO 5 de 6: valor con la unidad pegada (`"6 mg"`, `"100 mL/h"`, `"0,25 mg"`), coma
+   decimal (`"0,5"`) y unidad troceada (c10: de `h` a `min` en lugar de `mL/h` a `mL/min`; c11
+   con el SFT: de `mg` a `mg/lb`, perdiendo el `/kg`). Después no repite la llamada corregida:
+   calcula él mismo. En c10 el GRPO ignora el resultado de la herramienta (6000) y contesta
+   "1,7" (esperado 1,67). En c11 contesta 11,0 mg/lb, cuando lo correcto es 2,27.
+5. **Deja el `<think>` sin cerrar.** En 5 de 30 respuestas con herramientas en cada adaptador
+   (GRPO: c01, c02, c10, c20, c23; SFT: c03, c10, c11, c18, c21) el modelo escribe la respuesta
+   dentro del bloque y termina sin `</think>`. En el GRPO solo c02 parece cortado por el límite
+   de tokens (por la longitud del texto); el resto termina sin cerrar. Con la puntuación
+   estricta esa respuesta cuenta como vacía. Afecta a c23 con el GRPO: contesta bien ("1 mL")
+   pero dentro del bloque. Contando ese caso, el GRPO con herramientas tendría 11 de 15, igual
+   que el SFT. c10 es un error real (1,7). Así, la diferencia entre "sin herramientas" (12) y
+   "con herramientas" (10 y 11) se explica sobre todo por el formato y no por las herramientas.
+   No cambiamos la puntuación (el banco está congelado) y lo dejamos anotado.
+6. **Contesta de memoria cuando debería consultar CIMA.** En c06 los dos adaptadores responden
+   "La presentación del omeprazol es 40 mg/2 mL" sin llamar a `search_medication_cima`. En c05 el
+   GRPO presenta un comprimido oral como "presentación intravenosa" (el SFT contesta bien que no
+   hay). Las métricas numéricas no lo recogen y es el fallo más serio para un asistente de
+   enfermería.
+7. **Una herramienta con efectos secundarios, llamada sin pedirla.** En c23 el SFT llama a
+   `create_preparation_sheet` sin que nadie se lo haya pedido y rellena `steps` con el ejemplo de
+   su descripción (`15 mg/kg x 70 kg = 1050 mg`). El ejecutor la bloqueó porque la herramienta
+   exige confirmación (evaluamos con `allow_side_effects=False`), así que no se creó ningún PDF.
+   Es el único caso, y apoya la política de confirmación. Por eso la secuencia de c23 no cuenta
+   como correcta. En los 6 casos sin herramienta ningún adaptador llama a nada de más.
+
+**Qué concluimos.**
+
+- **La hipótesis se cumple.** La respuesta final mejora (sin herramientas con significación
+  estadística) y el uso de herramientas empeora: la selección baja del 73 % al 57-60 % y las
+  llamadas omitidas suben del 8 % al 42-46 %. El adaptador no vio nunca una llamada a herramienta
+  y resuelve solo lo que sabe resolver.
+- **Eso apoya el apartado "para ir más allá" (SFT para uso de herramientas).** Entrenar con trazas
+  que incluyan `<tool_call>` (y cierren bien el `<think>`) atacaría los tres problemas: no
+  delegar el cálculo, el formato de los argumentos y el cierre del razonamiento.
+- **No hemos activado el modelo entrenado en la aplicación.** `ToolLoop.load()` carga solo el
+  modelo base, así que el endpoint `/tools` sirve hoy Qwen3-0.6B sin adaptador. `evaluate.py` sí
+  lo aplica con `--adapter`. Dado que con el adaptador baja la selección, qué modelo servir en
+  `/tools` es una decisión del equipo que no hemos tomado.
+- **Límites.** 15 casos con respuesta numérica; una ejecución voraz por modelo; el adaptador y el
+  modo de razonamiento cambian a la vez; SFT y GRPO no son distinguibles con este banco; y la
+  puntuación estricta penaliza las respuestas con el `<think>` sin cerrar.
+- **Por probar (no hecho).** Qwen3-0.6B con `--thinking` y los adaptadores con
+  `enable_thinking=False`, para repartir el efecto entre el adaptador y el modo de razonamiento;
+  casos de cálculo más difíciles, como los de la fase 1; un SFT con trazas de uso de herramientas.
+
+---
+
+### 2026-10-27 · Fase 2 · Descripciones de las herramientas sin ejemplos
+
+**Qué queríamos saber.** Si quitar los ejemplos de las descripciones mejora el uso de las
+herramientas. Hay dos motivos. El primero: los fallos de `convert_units` son valores con la unidad
+pegada (`"6 mg"`), la forma de los ejemplos de su descripción ("0.5 g to mg"), y una compañera
+propuso quitarlos. El segundo, descubierto al revisarlo: los ejemplos coinciden con casos del banco.
+Los de conversión son c07 (0,5 g a mg), c10 (100 mL/h a mL/min) y c11 (5 mg/kg a mg/lb); en
+`dose_calculator` aparecían `500 / (8 * 60)` (la expresión esperada de c16) y `(0.5 * 12) / 2.5`
+(la de c14); y el `1050 mg` de `create_preparation_sheet` se coló en una llamada de c23. Si el
+cambio ayudaba, se lo propondríamos a Teresa, autora de `tools.py`.
+
+**Qué hicimos.** En una rama aparte (`exp_convert_desc`, no en `main`) quitamos solo los ejemplos de
+tres descripciones, dejando las instrucciones (por ejemplo, "no convierte entre magnitudes
+distintas: usa `dose_calculator`"):
+
+- `convert_units`: la línea de conversiones de ejemplo.
+- `dose_calculator`: las expresiones de ejemplo, en la descripción y en el argumento.
+- `create_preparation_sheet`: los valores de ejemplo de los cinco argumentos.
+
+No tocamos la lista de unidades de `from_unit` (incluye `'h'` y `'mg/kg/h'`) ni los ejemplos de
+`search_medication_cima` (`paracetamol`, `ibuprofeno`, `furosemida`, que también aparecen en c01,
+c02 y c05). Solo repetimos la condición con herramientas, porque la descripción no influye en la
+otra. Los 77 tests de herramientas, registro, parser, banco y ejecutor pasan con el cambio.
+
+```bash
+uv run python -m tool_use.evaluate --conditions tools \
+  --out reports/phase2_eval_qwen3-0.6b_desc.json
+uv run python -m tool_use.evaluate --conditions tools --adapter raquelfes11/dgm-arca-sft-lora \
+  --thinking --no-tools-prompt phase1 --out reports/phase2_eval_qwen3-0.6b_sft_desc.json
+```
+
+**Qué pasó.**
+
+| Solo con herramientas | Qwen3-0.6B, con ejemplos | Qwen3-0.6B, sin ejemplos | 0.6B + SFT, con ejemplos | 0.6B + SFT, sin ejemplos |
+|---|---|---|---|---|
+| Selección (30) | 73,3 % (22) | 76,7 % (23) | 60,0 % (18) | 56,7 % (17) |
+| Argumentos, estricto | 63,3 % (19) | 66,7 % (20) | 50,0 % (15) | 53,3 % (16) |
+| Llamadas omitidas / herramienta equivocada (24) | 2 / 6 | 1 / 6 | 11 / 1 | 11 / 2 |
+| Respuesta final (15) | 40,0 % (6) | 40,0 % (6) | 73,3 % (11) | 73,3 % (11) |
+| Llamadas a `convert_units` / con error | 10 / 4 | 17 / 13 | 5 / 5 | 5 / 4 |
+| Llamadas totales a herramientas | 23 | 31 | 15 | 18 |
+| `<think>` sin cerrar (de 30) | no aplica | no aplica | 5 | 8 |
+
+- **Los cambios se compensan.** Con el 0.6B cambian 7 casos y el balance neto es de uno (c08 ahora
+  llama bien a `convert_units`); en la respuesta final c15 se gana y c24 se pierde (ahora llama a
+  la hoja pero no da el número). Con el SFT, c06 pasa a consultar CIMA y c11 sale bien, pero c07 y
+  c10 dejan de llamar a la herramienta y c14 pierde la respuesta (la conversión baja de 3 a 1 en
+  selección). La comparación caso a caso de la respuesta final es de un caso a favor y uno en
+  contra en las dos parejas.
+- **Con el 0.6B base empeora un aspecto.** Las llamadas erróneas a `convert_units` pasan de 4 a 13:
+  en c17 repite la misma llamada fallida 5 veces seguidas y en c18 3 veces, cuando antes la
+  intentaba una sola. Los errores restantes son de otro tipo: convertir `mg` a `mL` (c13, c17,
+  c18), algo que la descripción ya prohíbe, o trocear la unidad (`mL` a `mL/min`, c10, c15, c16).
+- **La hipótesis del texto pegado al número no se confirma.** Con el 0.6B, los valores con unidad
+  pasan de 2 a 1; con el SFT se mantienen (`"0,5 mg/kg"`, `"500 mL"`, `"0,25 mg"` dos veces).
+- **Un único efecto visible.** En c23 el SFT ya no llama a `create_preparation_sheet` sin que se
+  la pidan: no hay ninguna llamada a la hoja fuera de los casos donde se pedía. Es un caso, pero
+  encaja con que el ejemplo (`1050 mg`) se estaba filtrando.
+- **Sobre la validez del banco.** Al quitar los ejemplos que coincidían con los casos, el 0.6B base
+  no empeora (73 % a 77 % en selección). Sugiere que el solapamiento no inflaba sus resultados.
+
+**Qué concluimos.** Quitar los ejemplos no mejora el uso de herramientas con ninguno de los dos
+modelos: las diferencias caen dentro del ruido de 30 casos y una ejecución voraz, y la respuesta
+final no cambia. El cuello de botella no está en las descripciones sino en el modelo, que no
+distingue para qué sirve cada herramienta (base) o no se entrenó para llamarlas (SFT). Por eso no
+proponemos el cambio a Teresa como mejora de exactitud, y `tools.py` de `main` no se modifica.
+Queda como opción de higiene (quitar de las descripciones ejemplos que coinciden con casos del
+banco), que decide el equipo.
+
+Límites: una sola ejecución por configuración, con 30 casos; cambiar una descripción altera las
+salidas de forma poco predecible, así que 7 casos modificados no son todos efecto del cambio; se
+cambiaron las tres herramientas a la vez; la lista de unidades de `from_unit` y los ejemplos de CIMA
+siguen en su sitio.
+
+Por probar (no hecho): devolver en el error de `convert_units` una pista ("para multiplicar o
+dividir usa `dose_calculator`"); aceptar valores con coma decimal (`"0,5"`), con cuidado de no
+ocultar errores de unidades en un dominio clínico; quitar `'h'` y `'mg/kg/h'` de la lista de
+unidades de `from_unit`.
+
+---
+
+### 2026-10-27 · Fase 2 · Una frase en el prompt para los encadenados (multi-step)
+
+**Qué queríamos saber.** Si se puede arreglar con el prompt de sistema el fallo más repetido del
+banco: ningún modelo completa los casos encadenados (c22, c23 y c24). Lo vimos también al probar
+`POST /tools` a mano: ante "busca la furosemida inyectable en CIMA y dime cuántos mL necesito para
+dar 40 mg", el modelo busca en CIMA, recibe un comprimido oral de 40 mg y contesta "40 mL" sin llamar a
+`dose_calculator`. La hipótesis era que el modelo se da por satisfecho tras el primer resultado y que
+bastaba pedirle que siga hasta resolver toda la petición.
+
+**Qué hicimos.** Un único cambio en `SYSTEM_PROMPT_TEMPLATE` de `tool_use/executor.py`, en la rama
+`exp_prompt_multistep` (no mergeada), sin ejemplos concretos para no volver a solapar con casos del
+banco:
+
+> Some tasks need several tools in sequence. After each result, check whether the user's request
+> is fully solved; if not, call the next tool. Answer only when every part of the request is done.
+
+Las descripciones de las herramientas son las originales (con ejemplos), así que la comparación
+justa es con las primeras ejecuciones. Solo la condición con herramientas, mismos parámetros que
+antes, una ejecución voraz por modelo:
+
+```bash
+uv run python -m tool_use.evaluate --conditions tools \
+  --out reports/phase2_eval_qwen3-0.6b_prompt.json
+uv run python -m tool_use.evaluate --conditions tools --adapter raquelfes11/dgm-arca-sft-lora \
+  --thinking --no-tools-prompt phase1 --out reports/phase2_eval_qwen3-0.6b_sft_prompt.json
+```
+
+**Qué pasó.**
+
+| Solo con herramientas | Qwen3-0.6B, sin la frase | Qwen3-0.6B, con la frase | 0.6B + SFT, sin la frase | 0.6B + SFT, con la frase |
+|---|---|---|---|---|
+| Selección (30) | 73,3 % (22) | 80,0 % (24) | 60,0 % (18) | 63,3 % (19) |
+| Argumentos, estricto | 63,3 % (19) | 70,0 % (21) | 50,0 % (15) | 53,3 % (16) |
+| Llamadas omitidas / herramienta equivocada (24) | 2 / 6 | 0 / 6 | 11 / 1 | 9 / 2 |
+| **Secuencia correcta en los 3 encadenados** | **0** | **0** | **0** | **0** |
+| Encadenados, selección / argumentos (3) | 3 / 2 | 3 / 2 | 1 / 0 | 1 / 0 |
+| Respuesta final (15) | 40,0 % (6) | 33,3 % (5) | 73,3 % (11) | 73,3 % (11) |
+| Llamadas totales / con error | 23 / 4 | 31 / 9 | 15 / 5 | 17 / 5 |
+
+- **Los encadenados no mejoran con ningún modelo.** Con el 0.6B, c22 se sigue parando tras CIMA y
+  contesta "40 mL"; c23 hace dos `convert_units` seguidos, el segundo de `mL` a `mL`, y acaba con
+  "500 mL"; c24 llama a `create_preparation_sheet` justo después del cálculo y, al no poder
+  ejecutarla, pide confirmación sin dar la dosis (antes sí la daba: pierde la respuesta correcta).
+  Con el SFT, c22 y c24 no hacen ninguna llamada: razonan que van a usar la herramienta y terminan
+  sin cerrar el `</think>` y sin hacerla; c23 es idéntico al de antes, con la llamada a la hoja
+  que nadie había pedido.
+- **Lo que sube no tiene que ver con encadenar.** Con el 0.6B, c08 y c09 (conversiones sencillas)
+  ahora llaman bien a `convert_units`, lo que explica el +2 en selección y en argumentos. Con el
+  SFT, c12 llama a `dose_calculator`, c06 consulta CIMA y c02 deja de hacerlo: cambios de un caso
+  que se compensan, con la respuesta final igual (11 de 15).
+- **Con el 0.6B base, el coste es real.** Las llamadas pasan de 23 a 31 y las erróneas de 4 a 9:
+  en c14 repite 4 veces la misma llamada fallida y en c18 3 veces. La respuesta final baja de 6 a 5
+  por c24.
+
+**Qué concluimos.** Es un resultado negativo: pedir en el prompt que se siga llamando a herramientas
+no mejora los encadenados con ninguno de los dos modelos. El fallo no es que el modelo se pare antes
+de tiempo, sino que no sabe qué herramienta toca después: elige `convert_units` o repite la
+anterior, o ni siquiera llama a la primera. Eso apunta a la falta de entrenamiento en llamadas
+encadenadas, no al prompt, y refuerza el apartado "para ir más allá" (SFT con trazas de varias
+herramientas). El cambio no se lleva a `main`: la rama `exp_prompt_multistep` queda como registro.
+El resultado también explica por qué el endpoint `/tools` falla en peticiones encadenadas con el
+modelo actual, algo que hay que tener presente al decidir qué modelo sirve.
+
+Límites: una sola frase, redactada en inglés y sin variantes (por ejemplo, una más explícita sobre
+el paso siguiente); una sola ejecución voraz por modelo con 30 casos; solo los modelos de 0.6B (el
+1.7B no se probó); y con solo 3 casos encadenados, cualquier mejora pequeña no se habría detectado.
+
+---
+
+### 2026-10-27 · Fase 3 · Generación del corpus
+
+**Qué queríamos saber.** Queríamos generar un corpus con información técnica de unos 45/50 medicamentos, para que el modelo pudiese obtener información actualizada sobre los medicamentos disponibles, su posología y posibles incompatibilidades y precauciones. 
+
+**Qué hicimos.** Para obtener estos documentos, hemos realizado consultas a la API de CIMA y hemos generado los documentos ejecutando el fichero `rag/download_corpus.py`.
+
+Para más información sobre como recuperar el corpus, su contenido y la licencia, leer el documento:
+
+`rag/CORPUS_README.md`
+
+Este documento se encuentra fuera de la carpeta de corpus/ ya que los documentos de nuestro corpus son ficheros .md y no queríamos que el README.md se incorporase al corpus.
+
+**Qué pasó.** Hemos obtenido la información técnica relevante para nuestro caso de uso de 47 medicamentos. Estos se encuentran especificados en la variable DRUGS del fichero `rag/download_corpus.py`.
+
+**Qué concluimos.** Una vez tenemos el corpus, podemos generar el conjunto dorado que utilizaremos como ground truth para medir y comparar el rendimiento de las diferentes estrategias de chunking; además de poder calcular el Recall@k y MRR para los tres retrievers.
+
+---
+
+### 2026-10-28 · Fase 3 · Construcción del conjunto dorado (gold) para evaluar el RAG
+
+**Qué queríamos saber.** Queremos tener de un conjunto dorado de 50 preguntas, cada una con la evidencia (el fragmento de texto del corpus que la responde), para comparar de forma objetiva los distintos retrievers y las distintas estrategias de chunking. Además, queremos que la mezcla de tipos de pregunta permita ver si el sistema falla en alguna categoría concreta.
+
+**Qué hicimos.** El gold se escribió a mano a partir de las fichas técnicas del corpus: para cada pregunta se localizó la evidencia en el texto original y se anotó en `evidence` junto con una nota sobre las secciones implicadas. Este conjunto de datos se puede encontrar en `rag/gold/gold.jsonl`. Las preguntas se reparten así:
+
+| Categoría | Nº | Descripción |
+|---|---|---|
+| Un medicamento, una sección | 15 | La respuesta está en una única sección continua. Se variaron medicamentos y secciones para no sesgar la evaluación. |
+| Un medicamento, varias secciones | 8 | La respuesta requiere combinar secciones no necesariamente consecutivas. |
+| Varios medicamentos | 8 | La respuesta combina información de una o varias secciones de fichas distintas. |
+| Inversas (de síntoma a fármaco) | 8 | Se describe un síntoma o característica y la respuesta es el medicamento y la sección donde se recoge el síntoma o característica descritos. |
+| Lenguaje coloquial | 5 | Redactadas sin terminología técnica, como las formularía un estudiante de Enfermería. |
+| Premisa dudosa | 3 | La pregunta contiene una suposición incorrecta o no respaldada por el corpus. Se espera que el sistema devuelva el texto donde se meustra que la suposición es incorrecta.|
+| Cálculo | 3 | Requieren recuperar datos de la ficha para utilizarse posteriormente en una operación. |
+
+Tras escribir y responder las preguntas, se ajustó la evidencia al tamaño de chunk previsto (`chunk_size=800`). Cuando una evidencia superaba ese tamaño, se dividió en dos o más fragmentos, que siguen asociados a la misma pregunta. Esto afectó a las preguntas 10, 16, 17, 19, 21, 25, 26 y 27 (numeración desde 1).
+
+**Qué pasó.** Se obtuvo un gold de 50 preguntas con evidencia verificada contra el texto original, en `rag/gold/gold.jsonl`. 8 de las 50 (16 %) tuvieron que partirse en varios fragmentos de evidencia, lo que ya indica que las respuestas largas no caben en un chunk de 800 caracteres. 
+
+**Qué concluimos.** Con este conjunto ya podemos medir la recuperación (recall@k y MRR) por categoría y no solo en global. Hay dos precauciones. Con 50 preguntas, las categorías pequeñas (3 de premisa dudosa, 3 de cálculo) dan resultados anecdóticos, así que se interpretarán como casos y no como porcentajes. Siguiente paso: evaluar las dos estrategias de chunking y los tres retrievers.
+
+---
+
+### 2026-10-29 · Fase 3 · Elección del umbral del chunking semántico
+
+**Qué queríamos saber.** Qué umbral de distancia coseno usar en `semantic_chunks` para poder
+compararlo con el chunking recursivo y fijarlo en `rag/generate.py`.
+
+**Qué hicimos.** Primero miramos la distribución de las distancias entre frases consecutivas de
+todo el corpus y la gráfica de un documento (ceftriaxona), con el barrido que propone el
+docstring de `rag/chunking.py` (0.15 a 0.4, con 0.25 por defecto). Sin embargo, 0.25 de threshold era demasiado bajo y troceaba practicamente por frases. Por lo tanto, probamos con un threshold más alto con el siguiente comando:
+
+```bash
+uv run python -m rag.chunking --doc ceftriaxona --sweep 0.15 0.2 0.25 0.3 0.4 0.5 0.6 0.7 0.75 0.8 0.85 --threshold 0.75 --out reports/rag/chunking_distances.png
+```
+
+Después medimos la recuperación con cada umbral sobre el conjunto dorado: para cada umbral se
+trocea el corpus, se construyen los tres retrievers (λ = 0.5 en el híbrido) y se calculan
+Recall@5 y MRR sobre las 50 preguntas. Una pregunta cuya evidencia no cabe entera en ningún
+chunk cuenta como fallo. Embeddings con Qwen3-Embedding-0.6B y `max_chunk_chars=1500`:
+
+```bash
+uv run python -m rag.evaluate --gold rag/gold/gold.jsonl --k 5 --thresholds 0.5 0.6 0.65 0.7 0.75 0.8 0.85 0.9 --out reports/phase3_threshold_sweep.json
+```
+
+El mismo comando cuenta también por qué se cierra cada chunk: por superar el umbral (corte
+semántico), por superar los 1500 caracteres (corte por tamaño) o por empezar una sección nueva
+(846 secciones). Por eso, en cada umbral, chunks = 846 + cortes semánticos + cortes por tamaño.
+
+**Qué pasó.** Las distancias en nuestro corpus son altas: p10 = 0.26, p25 = 0.39, p50 = 0.51,
+p75 = 0.65, p90 = 0.74, p95 = 0.78. Con los umbrales de ejemplo del docstring de `chunking.py` (0.15–0.4) salen entre
+11 000 y 14 000 chunks de unos 130 caracteres de media: prácticamente una frase por chunk.
+
+![Distancia entre frases consecutivas de la ficha de ceftriaxona, con el umbral 0.75](../reports/rag/chunking_distances.png)
+
+La gráfica no muestra picos aislados que separen temas: la distancia oscila entre 0.1 y 0.9
+dentro de todas las secciones y los inicios de sección (líneas grises) no coinciden con los
+picos. Las fichas técnicas cambian de tema de una frase a otra (listas de reacciones adversas,
+tablas de dosis), así que el umbral no se puede elegir a ojo y lo elegimos con el barrido:
+
+| Umbral | Chunks | Media (car.) | Sin resolver | Cortes semánticos | Cortes por tamaño | Dense Recall@5 / MRR | Hybrid Recall@5 / MRR |
+|---|---|---|---|---|---|---|---|
+| 0.50 | 8272 | 198 | 16 | 7414 | 12 | 0.350 / 0.311 | 0.370 / 0.343 |
+| 0.60 | 5630 | 272 | 12 | 4731 | 53 | 0.433 / 0.428 | 0.447 / 0.458 |
+| 0.65 | 4388 | 338 | 10 | 3434 | 108 | 0.473 / 0.457 | 0.458 / 0.442 |
+| 0.70 | 3334 | 433 | 5 | 2258 | 230 | 0.548 / 0.535 | 0.548 / 0.513 |
+| **0.75** | **2406** | **585** | **3** | **1171** | **389** | **0.543 / 0.567** | **0.568 / 0.592** |
+| 0.80 | 1825 | 758 | 2 | 444 | 535 | 0.578 / 0.569 | 0.588 / 0.591 |
+| 0.85 | 1563 | 879 | 1 | 102 | 615 | 0.643 / 0.617 | 0.653 / 0.632 |
+| 0.90 | 1496 | 916 | 1 | 12 | 638 | 0.653 / 0.607 | 0.653 / 0.628 |
+
+"Sin resolver" son las preguntas del gold cuya evidencia no está entera en ningún chunk. Como
+referencia, el chunking recursivo (`chunk_size=800`) da 2626 chunks de 556 caracteres de media:
+800 es el tamaño máximo, y las secciones cortas y los finales de sección dan chunks menores.
+
+**Qué concluimos.** Elegimos **0.75**, sabiendo que no es el umbral con mejores números: 0.85 y
+0.9 tienen unos 0.06–0.09 más de Recall@5 (3–4 preguntas de 50) y algo más de MRR. No los
+elegimos porque en ellos el criterio semántico casi no actúa: a partir de 0.8 los cortes por
+tamaño superan a los semánticos, y en 0.85 y 0.9 quedan 102 y 12 cortes semánticos frente a más
+de 600 por tamaño. Es decir, eso ya no es chunking semántico sino trocear cada sección cada 1500
+caracteres, y la mejora se explica porque los chunks son más grandes: es más fácil que contengan
+la evidencia entera (hay menos preguntas sin resolver) y hay menos chunks entre los que elegir.
+Además, chunks de 900 caracteres meten más texto irrelevante en el prompt de generación. 0.75 es
+el umbral más alto en el que el criterio semántico sigue haciendo la mayor parte de los cortes,
+empata en MRR del híbrido con 0.8 y tiene una longitud media (585) parecida a la del recursivo
+(556), lo que hace justa la comparación entre los dos chunkings. Con 50 preguntas, la diferencia
+entre 0.75 y 0.8 (unas 2 preguntas) no es significativa.
+
+---
+
+### 2026-10-29 · Fase 3 · Chunking recursivo frente a semántico, tres retrievers y barrido de λ
+
+**Qué queríamos saber.** Qué chunking y qué retriever recuperan mejor sobre el conjunto dorado,
+y qué λ usar en el híbrido.
+
+**Qué hicimos.** `rag/evaluate.py` trocea el corpus con las dos estrategias: recursivo
+(`chunk_size=800`, `overlap=100`) y semántico (umbral 0.75), ambos por secciones y con el
+encabezado de la sección delante de cada chunk. Para cada una construye BM25, denso
+(Qwen3-Embedding-0.6B con la instrucción por defecto) e híbrido. Como los ids de los chunks
+cambian con la estrategia, los fragmentos relevantes de cada pregunta se calculan buscando la
+evidencia del gold dentro del texto de los chunks. Con eso calcula Recall@5 y MRR de cada
+retriever y repite el híbrido con λ de 0 a 1 en pasos de 0.1:
+
+```bash
+uv run python -m rag.evaluate --gold rag/gold/gold.jsonl --k 5 --out reports/phase3_eval.json
+```
+
+**Qué pasó.** Todas las métricas son sobre las preguntas resueltas, las que tienen algún chunk
+que contiene su evidencia: 48 en recursivo y 47 en semántico. Barrido de λ del híbrido (peso de BM25; λ = 0 es el denso solo y λ = 1 es BM25
+solo), con el mejor λ de cada chunking en negrita:
+
+| λ | 0.0 | 0.1 | 0.2 | 0.3 | 0.4 | 0.5 | 0.6 | 0.7 | 0.8 | 0.9 | 1.0 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Recursivo Recall@5 | 0.642 | 0.642 | 0.642 | 0.642 | **0.642** | 0.611 | 0.569 | 0.503 | 0.465 | 0.444 | 0.424 |
+| Recursivo MRR | 0.568 | 0.577 | 0.593 | 0.612 | **0.632** | 0.616 | 0.502 | 0.481 | 0.445 | 0.413 | 0.394 |
+| Semántico Recall@5 | 0.578 | 0.578 | 0.578 | **0.583** | 0.583 | 0.605 | 0.594 | 0.514 | 0.486 | 0.454 | 0.475 |
+| Semántico MRR | 0.603 | 0.616 | 0.627 | **0.647** | 0.637 | 0.630 | 0.539 | 0.497 | 0.447 | 0.425 | 0.417 |
+
+Resultados de cada retriever, con el híbrido en λ = 0.5 y en el mejor λ:
+
+| Chunking | Chunks | Media | Sin resolver | BM25 Recall@5 / MRR | Dense Recall@5 / MRR | Hybrid λ=0.5 Recall@5 / MRR | Mejor λ | Hybrid mejor λ Recall@5 / MRR |
+|---|---|---|---|---|---|---|---|---|
+| Recursivo | 2626 | 556 | 2 (14, 44) | 0.424 / 0.394 | 0.642 / 0.568 | 0.611 / 0.616 | 0.4 | **0.642 / 0.632** |
+| Semántico 0.75 | 2406 | 585 | 3 (5, 7, 10) | 0.475 / 0.417 | 0.578 / 0.603 | 0.605 / 0.630 | 0.3 | 0.583 / **0.647** |
+
+En el barrido de λ se ven tres cosas:
+
+- Entre λ = 0 y el mejor λ el Recall@5 apenas cambia (0.642 en recursivo, 0.578–0.583 en
+  semántico), pero el MRR sube de 0.568 a 0.632 en recursivo (λ = 0.4) y de 0.603 a 0.647 en
+  semántico (λ = 0.3). Es decir, añadir un poco de BM25 no mete chunks relevantes nuevos en el
+  top 5, sino que sube de posición los que el denso ya encontraba.
+- A partir de λ = 0.6 las dos métricas caen rápido (en recursivo, el MRR baja a 0.502 con
+  λ = 0.6): el ranking pasa a estar dominado por BM25.
+- BM25 solo (λ = 1) es la peor configuración en los dos chunkings: coincide con la columna de
+  BM25 de la segunda tabla.
+
+Las preguntas sin resolver no se pueden puntuar porque ningún chunk contiene entero ninguno de
+sus fragmentos de evidencia. La salida de `rag/evaluate.py` las lista con la longitud de cada
+fragmento:
+
+| Chunking | Pregunta | Fragmentos de evidencia (caracteres) |
+|---|---|---|
+| Recursivo | 14 (tendinitis con levofloxacino) | 685 |
+| Recursivo | 44 (sobredosis de morfina) | 683 y 161 |
+| Semántico | 5 (contenido del vial de ceftriaxona) | 421 |
+| Semántico | 7 (reconstitución de la amoxicilina) | 389 |
+| Semántico | 10 (envases de enoxaparina) | 707 y 276 |
+
+Todos los fragmentos caben en el tamaño máximo de su chunking (800 y 1500 caracteres), así que
+no quedan sin resolver por ser largos: un corte cae en mitad de la evidencia y la reparte entre
+dos chunks. En recursivo es el divisor, que corta donde se le acaba el espacio. En semántico es
+un corte semántico o por tamaño.
+
+**Qué concluimos.** El denso gana a BM25 con diferencia. Creemos que se debe a las preguntas
+coloquiales e inversas (de síntoma a fármaco) del gold (ver la entrada del conjunto dorado), que
+no comparten palabras con la ficha. BM25 sirve como complemento con un
+peso pequeño: nuestra hipótesis es que sube el chunk bueno por coincidencia exacta con el nombre
+del fármaco o con cifras, en fichas de la misma familia que el denso confunde (cefalosporinas,
+carbapenems) aunque no lo hemos verificado pregunta a pregunta. Los dos chunkings quedan prácticamente
+empatados en MRR. Sin embargo, el recursivo tiene mejor recall y una pregunta menos sin resolver, así que
+**`/rag` usa chunking recursivo e híbrido con λ = 0.4**. Elegimos λ por MRR porque el endpoint
+devuelve pocos fragmentos y lo que importa es que el bueno salga primero. El análisis de las preguntas que
+fallan, por categoría del gold, está en la entrada siguiente. La comparación de instrucciones
+de embedding está en la entrada del 2026-11-01 (Instrucción de la consulta en los embeddings).
+
+---
+
+### 2026-10-30 · Fase 3 · Preguntas que fallan, por categoría del gold
+
+**Qué queríamos saber.** En qué tipos de pregunta falla la recuperación y si se cumple la
+hipótesis de la entrada anterior (que el denso gana por las preguntas coloquiales e inversas).
+
+**Qué hicimos.** Añadimos a `rag/evaluate.py` las métricas por categoría del gold y la lista de
+preguntas que fallan con el híbrido (con la ficha de la evidencia y la de cada fragmento
+recuperado). Las categorías se asignan por el número de pregunta, en el orden del gold. Mismo
+comando que en la entrada anterior.
+
+**Qué pasó.** Híbrido con chunking recursivo y λ = 0.4 (Recall@5 / MRR y número de fallos):
+
+| Categoría | Preguntas | Recall@5 / MRR | Fallos |
+|---|---|---|---|
+| Un medicamento, una sección | 15 | 0.571 / 0.524 | 6 |
+| Un medicamento, varias secciones | 8 | 0.521 / 0.812 | 1 |
+| Varios medicamentos | 8 | 0.583 / 0.463 | 2 |
+| Inversas | 8 | 1.000 / 1.000 | 0 |
+| Lenguaje coloquial | 5 | 0.250 / 0.250 | 3 |
+| Premisa dudosa | 3 | 0.667 / 0.700 | 1 |
+| Cálculo | 3 | 1.000 / 0.567 | 0 |
+
+En los 13 fallos, la ficha correcta está entre los cinco fragmentos recuperados: lo que falla
+es la sección, no el fármaco.
+
+**Qué concluimos.** Las inversas, que nos preocupaban, salen perfectas. Las peores son las
+coloquiales: "¿cuánto me dura la vancomicina ya preparada?" lleva a la ficha de la vancomicina,
+pero no a la sección de periodo de validez. La hipótesis se cumple solo en parte, porque en
+recursivo el denso gana a BM25 en todas las categorías, no solo en esas dos. También vimos que
+las preguntas 6 y 41 tienen evidencias tan genéricas que aparecen en varias fichas (3 y 7), y
+habría que alargarlas. Con tan pocas preguntas por categoría, estos resultados son orientativos.
+
+---
+
+### 2026-10-29 · Fase 3 · Generación con citas: primera prueba de `/rag`
+
+**Qué queríamos saber.** Si `POST /rag` funciona de principio a fin con nuestro modelo de
+razonamiento de la fase 1 como generador: si recupera, si cita fragmentos que existen y si dice
+que no sabe cuando el corpus no tiene la respuesta.
+
+**Qué hicimos.** `rag/generate.py` es lo que hay detrás de `POST /rag`. Al arrancar lee el corpus,
+lo trocea con chunking recursivo, construye los tres retrievers (híbrido con λ = 0.4, según el
+barrido de la entrada anterior) y carga el generador. El índice denso se guarda en `rag/index/`
+para no reembeber el corpus en cada arranque. Para cada pregunta recupera los `top_k` mejores
+fragmentos y los mete en el prompt aumentado con su identificador. Después genera la respuesta y
+extrae las citas, quedándose solo con las que existen entre los fragmentos devueltos.
+
+El generador se toma de las mismas variables que `/reasoning`, `ARCA_RLM_BASE_MODEL` y
+`ARCA_RLM_ADAPTER` del `.env`: nuestro modelo de la fase 1, Qwen3-0.6B con el adaptador LoRA
+`rlm/weights/final_rlm_lora_sin_kl`. Como se entrenó con el prompt de sistema de R1-Zero, el
+prompt aumentado se mete en ese prompt de sistema; el modelo razona en `<think>` y la respuesta
+es el bloque `<answer>`, igual que en `/reasoning`. La decodificación es voraz.
+
+Levantamos la API desde la raíz del repositorio y comprobamos que la fase `rag` aparece como
+`ready`:
+
+```bash
+uv run uvicorn api.app:app --port 8001
+curl localhost:8001/health
+```
+
+Hicimos tres peticiones, una con cada retriever. Las peticiones 
+aparecen con curl pero también las hicimos exponiendo la api con ngrok usando Postman 
+confirmando que funciona.
+
+**Qué pasó.**
+
+**Caso 1.** Una pregunta del gold, con el híbrido:
+
+```bash
+curl -s -X POST localhost:8001/rag -H 'Content-Type: application/json' \
+  -d '{"question": "¿Cómo debe ajustarse la dosis de cefotaxima en pacientes con insuficiencia renal grave?", "top_k": 5, "retriever": "hybrid"}'
+```
+
+Fragmentos recuperados: ceftriaxona 4.2 (0.91), cefotaxima 4.4 (0.84, `7f4d67e570-0026`),
+ceftazidima 4.2 (0.49, `910ed8f16d-0011`), cefuroxima 4.2.1 (0.45) y cefazolina 4.2 (0.44).
+Citas: ninguna. Respuesta:
+
+> La dosis de cefotaxima debe ajustarse según el cálculo del aclaramiento de creatinina, que se
+> basa en el valor de la creatinina sérica. La dosis de carga inicial es de 1 g y las dosis de
+> mantenimiento se basan en el aclaramiento de creatinina. La vigilancia clínica de la seguridad
+> y la eficacia debe incluir la monitorización de la función renal.
+
+El único fragmento de cefotaxima es el de la sección 4.4, no el de la 4.2 que tiene la respuesta
+(`7f4d67e570-0011`), así que no da la regla concreta de la ficha (reducir a la mitad la dosis de
+mantenimiento si el aclaramiento es < 10 ml/min). Además, "la dosis de carga inicial es de 1 g"
+es la dosis de la **ceftazidima** (`910ed8f16d-0011`), atribuida a la cefotaxima.
+
+**Caso 2.** Una pregunta coloquial, con el denso:
+
+```bash
+curl -s -X POST localhost:8001/rag -H 'Content-Type: application/json' \
+  -d '{"question": "¿Se puede dar meropenem con probenecid?", "top_k": 5, "retriever": "dense"}'
+```
+
+Fragmentos recuperados: meropenem 4.5 (0.86, `de9b07db3c-0021`), meropenem 4.4 (0.76),
+amoxicilina 4.5 (0.71), meropenem 4.4 (0.68) y meropenem 4.4 (0.68). Citas: ninguna. Respuesta:
+
+> Se puede administrar meropenem con probenecid, pero se debe considerar la inhibición de la 
+> excreción renal de meropenem por probenecid. La combinación puede afectar la dosis y la 
+> eficacia, por lo que se recomienda consultar a un médico antes de administrar ambas medicamentos.
+
+El primer fragmento tiene la respuesta: el probenecid inhibe la excreción renal del meropenem y
+"se requiere precaución". El modelo recoge la interacción, pero la conclusión ("ajustar la dosis
+de probenecid") no está en ningún fragmento.
+
+**Caso 3.** Una pregunta que el corpus no puede responder (el omeprazol no está en el corpus),
+con BM25:
+
+```bash
+curl -s -X POST localhost:8001/rag -H 'Content-Type: application/json' \
+  -d '{"question": "¿Cuál es la dosis de omeprazol intravenoso en una hemorragia digestiva?", "top_k": 5, "retriever": "bm25"}'
+```
+
+Fragmentos recuperados: enoxaparina 4.4 (17.9), heparina 4.9 (17.0), furosemida 4.2 (16.9),
+furosemida 4.2 (16.3) y azitromicina 4.2.2 (15.9). Citas: ninguna. Respuesta:
+
+> La información proporcionada no incluye datos sobre la dosis de omeprazol intravenosa en casos
+> de hemorragia digestiva. No hay referencias o datos sobre este medicamento en la información disponible.
+
+BM25 empareja palabras como "dosis", "intravenoso" o "hemorragia" y trae fragmentos sin relación,
+pero el modelo reconoce que no tiene la información. Es el comportamiento esperado.
+
+**Qué concluimos.** La API funciona con los tres retrievers, y la recuperación y el prompt
+aumentado son los esperados. Con nuestro modelo como generador, en cambio, las respuestas no
+cumplen lo que se pide en `/rag`. No cita ningún fragmento, aunque el prompt lo pide. Mezcla
+datos de fármacos distintos (la dosis de la ceftazidima) y añade conclusiones que no están en
+los fragmentos (ajustar la dosis de probenecid). Lo único que hace bien es reconocer que el
+omeprazol no está. Creemos que se debe al modelo y no al pipeline. El adaptador se entrenó para
+calcular dosis a partir de un enunciado corto y responder con un número en `<answer>`, no para
+leer varios fragmentos largos y citar su origen, y un modelo de 0.6B tiene poca capacidad para
+separar cinco fichas parecidas en el mismo contexto. Habría que entrenar al modelo para que 
+aprendiera a citar.
+
+---
+
+### 2026-11-01 · Fase 3 · ¿Sabe citar el generador? Comparación de cuatro modelos
+
+**Qué queríamos saber.** En la primera prueba de `/rag` nuestro modelo (Qwen3-0.6B con el adaptador
+de la fase 1) no citaba ningún fragmento. Queremos saber si es culpa del entrenamiento (SFT y GRPO
+nos habrían quitado la capacidad de citar) o del tamaño: ¿cita el 0.6B base sin adaptador?, ¿y
+uno mayor? Si el base cita y el nuestro no, hay que arreglar el entrenamiento; si no cita ni el
+base, habría que enseñarle a citar o cambiar de modelo.
+
+**Qué hicimos.** Misma recuperación y mismo prompt para los cuatro: chunking recursivo, híbrido
+con λ = 0.4, `top_k = 5`. Solo cambia el generador, que se elige con las variables de `/rag`.
+`rag/compare_generators.py` genera la respuesta de cada pregunta del gold que tiene fragmento
+relevante (48 de 50; dos no se resuelven con el chunking recursivo) y de 8 preguntas que el
+corpus no puede responder (omeprazol, metformina, atorvastatina, warfarina, diazepam rectal,
+precio de la vancomicina, descubridor de la penicilina, insulina glargina). Decodificación
+greedy, 1024 tokens máximo; los modelos base van sin razonamiento (`enable_thinking=False`) y el
+adaptador con el prompt de sistema R1-Zero de la fase 1.
+
+```bash
+ARCA_RLM_BASE_MODEL=Qwen/Qwen3-0.6B uv run python -m rag.compare_generators --tag qwen3-0.6b-base
+ARCA_RLM_BASE_MODEL=Qwen/Qwen3-0.6B ARCA_RLM_ADAPTER=rlm/weights/final_rlm_lora_sin_kl \
+  uv run python -m rag.compare_generators --tag qwen3-0.6b-rlm
+ARCA_RLM_BASE_MODEL=Qwen/Qwen3-1.7B uv run python -m rag.compare_generators --tag qwen3-1.7b
+ARCA_RLM_BASE_MODEL=Qwen/Qwen3-4B   uv run python -m rag.compare_generators --tag qwen3-4b
+```
+
+Las respuestas completas están en `reports/rag/generators/<tag>.json`. El script no carga el
+`.env`, así que el adaptador solo se aplica donde se indica (el campo `model` de cada JSON lo
+confirma). Una respuesta "cita" si contiene algún id entre corchetes que existe entre los cinco
+fragmentos devueltos. El reparto de las respuestas sin cita usa un detector de abstención por
+expresiones regulares, que es orientativo.
+
+**Qué pasó.** En 35 de las 48 preguntas el fragmento correcto estaba entre los cinco recuperados,
+igual para los cuatro modelos.
+
+| Modelo | Cita algo | Cita el fragmento correcto | Sin cita: abstención | Sin cita: fragmento correcto no recuperado | Sin cita: fragmento correcto recuperado | Ids inventados | Preguntas sin respuesta que citan |
+|---|---|---|---|---|---|---|---|
+| Qwen3-0.6B base | 17/48 (35 %) | 14 | 12 | 4 | 15 | 0 | 0/8 |
+| Qwen3-0.6B + adaptador (el nuestro), 1024 tokens | 6/48 (12,5 %) | 5 | 9 | 6 | 18 | 0 | 0/6 |
+| Qwen3-0.6B + adaptador (el nuestro), 1536 tokens | 5/48 (10,4 %) | 3 | 8 | 8 | 22 | 0 | 0/8 |
+| Qwen3-1.7B base | 38/48 (79 %) | 26 | 6 | 1 | 3 | 0 | 3/8 |
+| Qwen3-4B base | 45/48 (94 %) | 33 | 3 | 0 | 0 | 0 | 2/8 |
+
+*Fila del adaptador corregida (ver la entrada "Las citas eran ids del razonamiento"): 9 de las 48
+respuestas con fragmento y 2 de las 8 sin respuesta se truncaron dentro del razonamiento (1024
+tokens) y no cuentan como respuesta, por eso las 33 sin cita no suman 42 y las preguntas sin
+respuesta son 6. Antes de corregirlo la tabla decía 14/48 (29 %), 10, 9, 6, 19 y 1/8.*
+
+Cuando el fragmento correcto está entre los recuperados, el modelo lo cita en 14 de 35 casos
+(0.6B base), 5 y 3 (0.6B con adaptador, con 1024 y 1536 tokens), 26 (1.7B) y 33 (4B).
+
+Lo que se ve al leer las respuestas:
+
+- **0.6B base.** Cita poco y mal. Cuando cita, a veces copia la cabecera del contexto
+  (`[id] (from fichero.md)`) en vez de citar al final de la afirmación. Mezcla fármacos (habla de
+  abrocitinib y fluconazol en una pregunta de meropenem), inventa cifras (dexketoprofeno a
+  "1,4 microgramos/kg/h") y se abstiene en inglés.
+- **0.6B con adaptador.** Peor que el base. En 9 de 48 respuestas el razonamiento se corta a los
+  1024 tokens sin llegar a la respuesta, y esas respuestas devolvían el razonamiento como si fuera
+  la respuesta, con sus ids contados como citas (ver la entrada siguiente a esta). Dice que la información no incluye "quién descubrió la penicilina" y a continuación
+  responde "Alexander Fleming en 1928" con conocimiento propio.
+- **1.7B.** Cita en cuatro de cada cinco respuestas. Las sin cita son abstenciones o preguntas donde
+  el fragmento correcto no se recuperó; solo 3 no citan teniendo el fragmento. En atorvastatina y
+  warfarina, que el corpus no responde, cita un fragmento lateral y contesta con conocimiento propio.
+- **4B.** Cita en 45 de 48 y casi siempre el fragmento correcto cuando lo tiene. Las tres sin cita
+  son abstenciones. En 6 de las 8 preguntas sin respuesta no cita nada y dice que la información no
+  está. En warfarina cita fragmentos y explica el INR, y en
+  diazepam rectal dice que no hay dosis pediátrica pero cita un fragmento relacionado.
+
+Ningún modelo inventa ids. La comprobación de que los ids existen siempre se cumple, pero
+**no garantiza que la afirmación esté en el fragmento citado**: el 1.7B y el 4B citan en preguntas
+que el corpus no responde y el 0.6B con adaptador responde fuera del corpus. Citar es necesario y
+no basta.
+
+**Qué concluimos.**
+
+1. **El 0.6B base ya citaba poco (35 %), y con el adaptador cita bastante menos (10-12 %).**
+   Nuestra primera lectura, que el SFT y el GRPO no habían empeorado la capacidad de citar, se
+   apoyaba en una cifra inflada: el 29 % incluía ids mencionados mientras razonaba. Con la cifra
+   corregida el adaptador queda por debajo del base, y la caída no se explica solo porque el
+   razonamiento se trunque: con 1536 tokens terminan 43 de 48 respuestas y solo 5 citan (12 %)
+   frente al 35 % del base (ver la entrada siguiente). Es una diferencia sobre 48 preguntas y
+   una ejecución, así que la damos como indicio y no como medida.
+2. **El factor determinante es el tamaño.** Con el mismo prompt, citar pasa de 35 % (0.6B) a 79 %
+   (1.7B) y 94 % (4B). El 0.6B no es capaz de seguir "cita los pasajes que uses" aunque el
+   fragmento esté delante (15 casos sin cita con el fragmento recuperado), mientras que el 4B
+   falla en 0.
+3. **Hay que cambiar el generador de `/rag`, no entrenar al 0.6B.** Qwen3-4B es el que cumple lo
+   que pide el README: cita, las citas existen y casi siempre apoyan la respuesta. Por lo tanto, para que el modelo cite correctamente deberíamos hacer SFT sobre un modelo que ya sepa citar, uno más grande que el de 0.6B. Para ello, habría que volver a hacer la fase 1 con un modelo más grande como el 4B. Para cambiarlo en las pruebas solo hay que poner
+   `ARCA_RLM_BASE_MODEL=Qwen/Qwen3-4B` y dejar `ARCA_RLM_ADAPTER` vacío.
+4. **Parte de las respuestas sin cita no son culpa del generador.** Con los modelos grandes lo que
+   queda sin citar es sobre todo abstención o fragmento no recuperado. Los fallos de recuperación
+   se concentran en conservación, periodo de validez y envases, donde el texto del fragmento no
+   contiene el nombre del fármaco (`6.3 Periodo de validez | Antes de la apertura: 3 años…` es
+   casi igual en las 47 fichas). Habría que ver si poniendo el
+   nombre del fármaco en la cabecera del chunk, reembebiendo y repitiendo `rag.evaluate` los resultados mejoran.
+
+---
+
+### 2026-11-01 · Fase 3 · Instrucción de la consulta en los embeddings
+
+**Qué queríamos saber.** Qwen3-Embedding se entrena con una instrucción de tarea delante de la
+consulta (`Instruct: ...\nQuery: ...`) y los pasajes se embeben sin ella. Hasta ahora usábamos la
+instrucción por defecto de `rag/embed.py`. Queremos saber cuánto cambia la recuperación si la
+cambiamos, si una instrucción adaptada a nuestro dominio (fichas técnicas, enfermería) la mejora
+y qué pasa sin instrucción o con una que no tiene que ver con la tarea.
+
+**Qué hicimos.** `instruction_sweep` en `rag/evaluate.py`. Los vectores de los pasajes no dependen
+de la instrucción, así que se carga el índice denso persistido y solo cambia `query_instruction`
+(sin reembeber el corpus). Chunking recursivo, λ = 0.4 para el híbrido, k = 5 y las 48 preguntas
+del gold con fragmento resuelto. Se compararon seis instrucciones (`QUERY_INSTRUCTIONS`):
+`default`; `none` (la consulta sin el prefijo `Instruct:`); `domain_en` y `domain_es`
+(fragmento de la ficha técnica que responde a una pregunta de enfermería, en inglés y en español);
+`drug_first` (identificar primero el fármaco y recuperar la sección de su ficha) y `unrelated`
+("Classify the sentiment of the following text."), un control que no tiene que ver con recuperar.
+
+```bash
+uv run python -m rag.evaluate --gold rag/gold/gold.jsonl --k 5 --lam 0.4 --instruction-sweep
+```
+
+Resultados completos en `reports/phase3_instruction_sweep.json`. "Gana/pierde" son los números de
+pregunta (desde 1) que el denso acierta/falla respecto a `default`.
+
+**Qué pasó.**
+
+| Instrucción | Denso Recall@5 | Denso MRR | Fallos (denso) | Híbrido Recall@5 | Híbrido MRR | Gana | Pierde |
+|---|---|---|---|---|---|---|---|
+| default | 0.642 | 0.568 | 13 | 0.642 | 0.632 | | |
+| none | 0.653 | 0.605 | 12 | 0.663 | 0.652 | 3, 30 | 46 |
+| domain_en | 0.580 | 0.523 | 16 | 0.611 | 0.593 | 30 | 24, 31, 46, 49 |
+| domain_es | 0.590 | 0.553 | 16 | 0.622 | 0.622 | 30 | 21, 31, 46, 49 |
+| drug_first | 0.569 | 0.551 | 17 | 0.622 | 0.601 | | 24, 31, 46, 49 |
+| unrelated | 0.000 | 0.000 | 48 | 0.000 | 0.000 | | 35 preguntas |
+
+- **Quitar la instrucción cambia poco.** `default` y `none` quedan dentro de un punto de Recall@5
+  (0.642 y 0.653 en denso): una pregunta de diferencia sobre 48.
+- **Las instrucciones de dominio empeoran, no mejoran.** `domain_en`, `domain_es` y `drug_first`
+  bajan el denso 5-7 puntos (de 13 a 16-17 fallos) y las tres pierden las preguntas 31, 46 y 49
+  (más la 24, o la 21 en `domain_es`); en el híbrido bajan 2-3 puntos. Esperábamos lo contrario.
+- **El control hunde la recuperación.** Con la instrucción de sentimiento, los fragmentos mejor
+  puntuados de una consulta tienen todos la misma similitud (0.547 en el caso que miramos), es
+  decir, el vector de la consulta deja de depender de la pregunta y el ranking es casi constante.
+  El híbrido también cae a 0. Creemos que es porque, con las puntuaciones del denso empatadas, el
+  reescalado a [0, 1] da 1 a los 20 fragmentos del denso y BM25 no consigue sacar a ninguno de los
+  suyos por encima; no lo hemos comprobado.
+
+**Qué concluimos.**
+
+1. **La instrucción importa, pero quitarla apenas cambia el resultado.** La diferencia entre
+   `default` y `none` es de una pregunta y no la interpretamos con 48 preguntas y una sola
+   ejecución. Lo que sí es claro es el efecto del control, que confirma que la instrucción
+   participa de verdad en el vector de la consulta.
+2. **Nuestra hipótesis de que una instrucción de dominio ayudaría no se cumple.** Las tres que
+   mencionan fichas técnicas o el fármaco pierden las preguntas 31, 46 y 49. La 31 (y la 24 y la
+   21 en alguna de ellas) son de "varios medicamentos", con dos fármacos en la consulta; la 46 es
+   de premisa dudosa (amikacina y embarazo) y la 49 de cálculo. Nuestra explicación tentativa es que una instrucción que pide "el fragmento de
+   la ficha" o "identificar el fármaco" empuja la consulta hacia un solo fármaco o hacia el estilo de
+   ficha y se pierde el segundo. No lo hemos comprobado mirando los fragmentos recuperados.
+3. **No cambiamos la instrucción de `/rag`.** `none` sale unas décimas por encima, pero la mejora
+   no se distingue de una pregunta más. Dejamos la de por defecto, la que viene en `rag/embed.py`.
+
+---
+
+### 2026-11-02 · Fase 3 · Las citas del RLM eran ids que mencionaba mientras razonaba
+
+**Qué queríamos saber.** La tabla de la entrada anterior daba al RLM un 29 % de respuestas con
+cita, pero al leer sus respuestas varias empezaban por `<think> Vale, voy a resolverlo paso a
+paso…`. Queríamos saber de dónde salían esas citas y si eran citas de la respuesta o no.
+
+**Qué vimos.** Las respuestas del RLM con `<think>` en el texto son 11 de las 56 generadas (9 de
+las 48 con fragmento y 2 de las 8 sin respuesta). Todas miden entre 1021 y 1024 tokens, mientras que
+el resto no pasa de 328. `MAX_NEW_TOKENS` era 1024: el modelo se quedaba sin tokens **antes de cerrar
+el razonamiento**, sin `</think>` ni `<answer>`. Entonces `split_thinking` (`rlm/inference.py`) no
+encuentra un bloque de razonamiento completo y, por diseño, devuelve todo el texto como respuesta. El
+razonamiento truncado acababa siendo la respuesta de `/rag`, y `extract_citations` contaba como
+citas los ids que el modelo mencionaba al razonar ("…el parágrafo [dd4c9e923a-0010], que dice…"). De
+esas 11, 9 tenían citas. No era un fallo de `split_thinking`: es un caso que el código no
+distinguía de una respuesta normal.
+
+Una cita tiene que salir de la respuesta, no del razonamiento. Con las respuestas truncadas tratadas
+como "sin respuesta", el RLM cita en 6 de 48 preguntas (12,5 %) y no en 14 (29 %), y cita el
+fragmento correcto en 5 y no en 10. Lo recalculamos sobre las respuestas ya guardadas, sin generar de
+nuevo, y corregimos la fila del RLM en la entrada anterior.
+
+**Qué hicimos.** Cuatro cambios, los tres primeros en `rag/generate.py`:
+
+1. `final_answer(raw)`: si la generación tiene `<think>` pero no `</think>`, se cortó razonando y no
+   hay respuesta; devuelve `TRUNCATED_ANSWER` ("No se pudo completar la respuesta: el razonamiento
+   del modelo se truncó.") en vez de una cadena vacía, para que se vea que falló. En el resto de
+   casos usa `split_thinking` como antes. Solo se aplica con adaptador.
+2. `MAX_NEW_TOKENS` de 1024 a 1536 (un 50 % más), para que al RLM le dé tiempo a cerrar el
+   razonamiento.
+3. `check_citations(answer, valid_ids)` separa los ids entre corchetes en válidos e inválidos
+   (los que no están entre los fragmentos devueltos, ya sean ids inventados u otro texto entre
+   corchetes como `[1]`). `extract_citations` pasa a usarla, con la misma firma y resultado.
+4. `RagResponse` en `api/schemas.py` gana el campo opcional `invalid_citations: list[str]`
+   (vacío por defecto, no cambia lo que la API devolvía) y `to_response` lo rellena, además de
+   escribir un aviso en el log cuando hay inválidos. Hasta ahora un id inventado se descartaba sin
+   dejar rastro.
+
+**Qué pasó con 1536 tokens.** Repetimos solo el RLM con el cambio
+(`reports/rag/generators/qwen3-0.6b-rlm-1536.json`):
+
+| RLM | Truncadas | Cita algo | Cita el fragmento correcto | Sin cita entre las que terminan |
+|---|---|---|---|---|
+| 1024 tokens (recalculado) | 9 de 48 (y 2 de 8 sin respuesta) | 6/48 (12,5 %) | 5 | 33 de 39 |
+| 1536 tokens | 5 de 48 (y 0 de 8 sin respuesta) | 5/48 (10,4 %) | 3 | 38 de 43 |
+
+Seis de las nueve respuestas truncadas con 1024 tokens terminan ahora (tres de ellas citan), pero
+dos de las que terminaban pasan a truncarse, de ahí 9 → 5. Y el total de citas, que parece estable
+(6 frente a 5), esconde mucho cambio: de las 6 preguntas que citaban con 1024 tokens, solo 2
+vuelven a citar. De las 39 respuestas que ya terminaban con 1024 tokens, 33 tienen un texto
+distinto al repetir, aunque la decodificación sea greedy (6 salen idénticas). La generación del RLM
+no es reproducible entre ejecuciones, algo que ya vimos al llamar dos veces a la API con la misma
+pregunta, y no hemos investigado la causa. Ya no queda ningún `<think>` suelto en las respuestas.
+Los ids inventados siguen siendo 0 y ninguna de las 8 preguntas sin respuesta cita.
+
+Comprobamos que la API sigue funcionando: los tests pasan, los tres retrievers de
+`POST /rag` responden con el campo nuevo y un retriever inválido sigue dando 422. Los resultados de
+recuperación no cambian (`reports/phase3_eval.json`, el barrido del umbral y el de instrucciones
+salen idénticos) y los tres modelos sin adaptador no se ven afectados: sus respuestas más largas son
+de 296, 686 y 750 tokens, por debajo del límite antiguo.
+
+**Qué concluimos.**
+
+1. **La cifra de citas del RLM estaba inflada.** Más de la mitad de las citas que contaba (8 de las 14
+   respuestas con cita eran de respuestas truncadas) venían del razonamiento. Con el límite de 1024
+   tokens el RLM cita en el 12,5 % de las preguntas, frente al 35 % del 0.6B base.
+2. **Cambia una conclusión de la entrada anterior.** Allí decíamos que el SFT y el GRPO no nos habían
+   quitado la capacidad de citar. Con la cifra corregida el adaptador cita menos que el base, y la
+   ejecución con 1536 tokens indica que no es solo el truncamiento: con casi todas las respuestas
+   terminadas (43 de 48) cita el 12 %, frente al 35 % del base. Lo más probable es que el adaptador,
+   entrenado para devolver un número en `<answer>`, haya perdido parte de la tendencia a citar; no
+   lo hemos aislado (haría falta el mismo prompt con el adaptador desactivado y la misma plantilla
+   de razonamiento, y más preguntas).
+3. **Un id entre corchetes no es una cita.** La comprobación automática que ya había (el id existe
+   entre los fragmentos devueltos) no distingue dónde lo escribió el modelo. Ahora solo se mira el
+   texto de la respuesta, pero seguimos sin comprobar que la afirmación esté en el fragmento
+   citado; para eso haría falta un modelo juez.
+
+**Limitaciones.** Como la generación no es reproducible, las cifras de citas de cualquiera de los
+cuatro modelos (no solo el RLM) llevan un ruido que no hemos medido; no hemos repetido ninguna
+ejecución varias veces. El recálculo con 1024 tokens usa las respuestas ya guardadas y trata las truncadas
+como "sin respuesta", sin volver a generar. El detector de abstención sigue siendo una expresión
+regular. 48 preguntas y una sola ejecución.
+
+---
+
+### 2026-11-03 · Fase 4 · Timeout por herramienta del agente
+
+**Qué queríamos saber.** El README de la fase 4 pide un "límite de tiempo por herramienta" en el
+bucle ReAct. Lo implementamos primero con 60 s, una estimación sin datos. Queríamos un valor
+elegido con lo que tardan de verdad las herramientas del agente.
+
+**Qué hicimos.** `uv run python -m agent.measure_latency` (escribe `reports/agent_tool_latency.json`).
+Llama a `registry.call` directamente, sin el tope del agente, para que las llamadas lentas no se
+corten. Mide segundos de reloj:
+
+- `dose_calculator` y `convert_units`: 200 llamadas cada una.
+- `search_medication_cima`: 18 llamadas reales a la API de CIMA, con 17 principios activos
+  distintos y uno que no existe (`zorbaxil`, que devuelve error rápido).
+- `search_knowledge_base` en caliente (retriever ya construido): una llamada por pregunta del
+  gold, 50 en total, `top_k = 5`, retriever híbrido con λ = 0.4 y chunking recursivo.
+- `search_knowledge_base` en frío: la primera llamada de un proceso nuevo, que construye el
+  retriever (carga el modelo de embeddings y el índice denso guardado en `rag/index/recursive`).
+  3 procesos distintos.
+- `search_knowledge_base` en frío y sin índice guardado: lo mismo con una carpeta temporal, de modo
+  que hay que calcular los embeddings de todo el corpus. 1 proceso; el índice real no se toca.
+
+**Qué pasó.**
+
+| Herramienta | n | Mediana | p95 | Máximo |
+|---|---|---|---|---|
+| `dose_calculator` | 200 | 0.03 ms | 0.04 ms | 3 ms |
+| `convert_units` | 200 | 0.10 ms | 0.12 ms | 268 ms |
+| `search_medication_cima` | 18 | 0.40 s | 1.10 s | 1.10 s |
+| `search_knowledge_base` (en caliente) | 50 | 0.29 s | 0.78 s | 0.80 s |
+| `search_knowledge_base` (en frío, con índice) | 3 | 11.9 s | 11.9 s | 11.9 s |
+| `search_knowledge_base` (en frío, sin índice) | 1 | 104 s | 104 s | 104 s |
+
+Las herramientas locales son prácticamente instantáneas (el máximo de `convert_units` es,
+probablemente, la primera llamada, que construye el registro de unidades de `pint`). CIMA es una
+llamada de red: la mediana es 0.4 s y la peor fue 1.1 s; además `search_medication_cima` ya se rinde
+sola a los 15 s (`timeout=15` en `tool_use/tools.py`). La búsqueda en caliente no pasa de 0.8 s. Lo
+lento es construir el retriever la primera vez: 11.7 a 11.9 s en las tres repeticiones con el índice
+ya guardado, y 104 s cuando hay que calcular los embeddings del corpus (83 lotes).
+
+Con el valor anterior, 60 s, la prueba en frío y sin índice se cortó antes de terminar. Además, el
+hilo abandonado seguía usando la GPU cuando terminó el programa y el proceso abortó con `terminate
+called without an active exception`: un hilo de Python no se puede matar, solo abandonarlo.
+
+**Qué concluimos.** `TOOL_TIMEOUT_S = 30` s, igual para todas las herramientas. Es unas 27 veces la
+peor llamada normal (1.1 s), unas 2.5 veces la primera búsqueda con el índice guardado (11.9 s) y el
+doble del límite propio de CIMA (15 s), así que ninguna llamada sana debería cortarse y una colgada
+se detecta en medio minuto. Con 30 s, una tarea de `max_steps` pasos pierde como mucho
+`30 · max_steps` s por culpa de herramientas colgadas. Un único valor sirve porque ninguna
+herramienta normal necesita más de 12 s; si añadimos una que tarde más, tendría que llevar el suyo.
+
+Lo que 30 s **no** cubre es construir el índice desde cero (104 s). Es un evento de despliegue, no de
+funcionamiento normal: `/rag` y el agente comparten `rag/index/recursive`, así que basta con que
+exista (lo crea la primera llamada a `/rag` o al retriever). Si no existe, la primera búsqueda del
+agente agota el tiempo, el modelo recibe el error y el retriever termina de construirse en segundo
+plano, de modo que la llamada siguiente ya funciona. Si queremos evitarlo, lo razonable es construir
+el retriever en `ReActAgent.load()`, pero lo dejamos sin hacer: encarece el arranque de la API.
+
+Hay que leer estos números con cautela: mientras corría la medición se estaba ejecutando en paralelo otra prueba del
+agente en la misma GPU, así que los tiempos que dependen de ella (búsqueda en caliente, en frío y
+sin índice) pueden estar algo inflados. La repetición en frío, que dio 11.7 a 11.9 s, sugiere que el
+efecto fue pequeño, pero el caso sin índice es una sola ejecución y su 104 s es una cota alta, no una
+medida limpia. Los 18 tiempos de CIMA son de un solo momento y dependen de la red. El timeout abandona 
+el hilo, no lo detiene: una herramienta colgada sigue consumiendo recursos hasta que termina por su cuenta. 
+Mide la herramienta aislada; no incluye la generación del modelo, que es lo que más tarda en cada paso del agente.
+
+---
+
+### 2026-11-03 · Fase 4 · Evitar el bucle de llamadas idénticas
+
+**Qué queríamos saber.** El README de la fase 4 pide guardarraíles contra bucles ("la misma llamada
+repetida") y el docstring de `ReActAgent.run` pide decidir qué se hace en ese caso. Nos lo
+encontramos en una prueba con el cerebro `thinking` (la pregunta de la cefotaxima en insuficiencia
+renal): en el paso 2 el modelo repitió exactamente la llamada del paso 1,
+`search_medication_cima(active_ingredient="cefotaxima", max_results=5)`, y no avanzó.
+
+**Qué hicimos.** En `agent/react_agent.py`, cada ejecución de `run` cuenta cuántas veces se ha hecho
+cada llamada. La clave es el nombre de la herramienta más sus argumentos con las claves ordenadas
+(`json.dumps(..., sort_keys=True)`), así que `{"a": 1, "b": 2}` y `{"b": 2, "a": 1}` cuentan como la
+misma. El contador es de la ejecución y no pasa de una petición a otra. Con
+`MAX_REPEATED_CALLS = 3`:
+
+- La primera vez se ejecuta sin más.
+- La segunda vez idéntica también se ejecuta, pero se añade a la observación un aviso: ya hiciste
+  esta llamada y el resultado no va a cambiar, prueba otros argumentos u otra herramienta, o llama a
+  `final_answer`.
+- La tercera vez idéntica no se ejecuta. Se añade a la traza un paso con la observación
+  `Loop detected` y la ejecución termina con `succeeded=False` y `final_answer=""`, en lugar de
+  gastar los pasos que queden.
+- `final_answer` no cuenta: la función termina antes de llegar a este código.
+
+Para probarlo sin cargar ningún modelo, `tests/test_react_agent.py` cambia `generate` por una función
+que devuelve respuestas fijadas de antemano (`uv run pytest tests/test_react_agent.py`).
+
+**Qué pasó.** Con esas respuestas fijas: tres llamadas idénticas seguidas, con `max_steps=10`,
+terminan en 3 pasos con `succeeded=False`. El paso 2 lleva el aviso, el paso 3 empieza por
+`Loop detected` y el paso 1 no lleva aviso. Cuatro llamadas a la misma herramienta con argumentos
+distintos no producen ningún aviso y acaban bien. En la ejecución real con `thinking` la repetición
+ocurrió en el paso 2; no comprobamos si la observación llevaba el aviso, y en el paso 3 el modelo
+dio ya su respuesta final, sin haber consultado la base de conocimiento.
+
+**Qué concluimos.** Comprobamos que el mecanismo funciona como lo hemos descrito, pero no que ayude a
+un modelo real. Con un solo caso no podemos atribuir al aviso lo que hizo el modelo en el paso 3.
+Avisar a la segunda y cortar a la tercera es una decisión nuestra y no está medida. Cuando haya banco
+de tareas compararemos, con y sin detección, la tasa de éxito y el número de pasos.
+
+El mecanismo tiene límites. Solo detecta repeticiones exactas: no ve un modelo que alterne A, B, A, B, ni uno
+que cambie un argumento sin importancia (`"cefotaxima"` por `"Cefotaxima"`). El contador suma las
+repeticiones de toda la ejecución, no solo las seguidas. Al cortar se devuelve `final_answer=""`, de
+modo que el usuario no recibe nada aunque el agente ya tuviera información útil; otra opción sería
+obligarle a cerrar con lo que haya reunido. El aviso está en inglés, como el resto del prompt.
+
+---
+
+### 2026-11-03 · Fase 4 · Herramientas que piden confirmación
+
+**Qué queríamos saber.** Algunas herramientas llevan `requires_confirmation=True` porque tienen
+efectos secundarios. En el registro por defecto solo hay una, `create_preparation_sheet`, que escribe
+un PDF en disco. En una llamada a `POST /agent` no hay nadie que pueda confirmar, y el docstring de
+`ReActAgent.run` pide decidir qué hacer en ese caso.
+
+**Qué hicimos.** Las bloqueamos siempre. En `ReActAgent._call_tool`, antes de ejecutar nada, si la
+herramienta tiene `requires_confirmation` no se llama a `registry.call`. Se devuelve un
+`ToolCallRecord` con `ok=False`, `requires_confirmation=True` y un error que el modelo lee como
+observación: la herramienta requiere confirmación del usuario y no puede ejecutarse aquí, que use otra
+o explique en `final_answer` lo que haría. El bucle continúa, así que el modelo puede buscar otra vía
+o cerrar explicándolo. La comprobación mira el atributo de la herramienta, no su nombre, y se hace antes
+de validar los argumentos. Descartamos ejecutarlas sin más (no hay quien confirme) y hacerlo
+configurable (más superficie para equivocarse).
+
+Lo probamos con las respuestas fijadas de antemano de `tests/test_react_agent.py`.
+
+**Qué pasó.** Cuando el modelo pide `create_preparation_sheet`, recibe la observación de bloqueo y no
+se crea ningún archivo en la carpeta de fichas (el test compara su contenido antes y después).
+Después puede terminar con `final_answer` y `succeeded=True`. Llamando directamente a `_call_tool`
+sale `ok=False` con `requires_confirmation=True`. En ninguna de nuestras ejecuciones con modelos
+reales se ha intentado llamar a esa herramienta, así que no sabemos cómo reacciona uno al bloqueo.
+
+**Qué concluimos.** Mientras no haya un canal de confirmación, bloquear es lo más seguro, y el README
+menciona esta cuestión entre los guardarraíles. El coste lo asumimos: el agente no puede completar
+una tarea cuyo resultado sea esa ficha, y como mucho dirá lo que haría. Si el banco incluye alguna que
+la necesite, será una tarea que el agente no puede resolver por diseño y habrá que anotarlo, no
+contarlo como fallo del modelo.
+
+Conviene tener presente que esto es distinto de lo que hace la fase 2: `tool_use/executor.py` permite los
+efectos secundarios por defecto (`ARCA_TOOLS_ALLOW_SIDE_EFFECTS` vale `"1"`) y, cuando los desactiva,
+su mensaje dice "Ask the user to confirm". El agente es más estricto y no tiene ninguna variable para
+relajarlo. El mensaje de bloqueo está en inglés. Y no tenemos medido cuántas veces un modelo pediría
+una herramienta bloqueada.
+
+---
+
+### 2026-11-03 · Fase 4 · Política de memoria del agente
+
+**Qué queríamos saber.** `agent/memory.py` traía hecha la mecánica (guardar mensajes, contar tokens,
+resumir lo viejo cuando se pasa el presupuesto) y dejaba nuestra la política: qué se resume, cuándo y
+qué se conserva siempre. El docstring de `compress` pregunta, además, si las observaciones de las
+herramientas deben recortarse antes de resumir y si el primer mensaje del usuario debe quedarse
+literal. Antes de decidir quisimos saber cuánto ocupa lo que entra en la conversación.
+
+**Qué hicimos.** Primero medimos: `uv run python -m agent.measure_context_size` (escribe
+`reports/agent_context_size.json`) cuenta tokens con el tokenizador de Qwen3-0.6B sobre las 20
+primeras preguntas de `rag/gold/gold.jsonl`. Mide el prompt de sistema con las herramientas
+registradas y `max_steps=10`, y las observaciones de `search_knowledge_base` (retriever híbrido,
+λ = 0.4, chunking recursivo) con `top_k` de 3 y de 5.
+
+Con eso fijamos la política, que está también en el docstring de `ConversationMemory.compress`, y la
+conectamos a `run` con un `summarize` que usa el propio cerebro. Las decisiones y su motivo:
+
+| Decisión | Valor | Motivo |
+|---|---|---|
+| Cuándo comprimir | Solo si se pasa el presupuesto (6000 tokens, sin cambiar) y hay algo más antiguo que lo que se conserva | Es la mecánica dada. Cambiamos cómo se cuenta: antes por simplicidad asumíamos `len(texto) // 4`, ahora el tokenizador del cerebro en uso, porque la aproximación subestima el español |
+| Qué se conserva siempre | La tarea, que nunca se resume (`pin_first`), y los últimos 6 mensajes (`keep_last`, el valor por defecto) | La tarea es lo único que el agente no puede reconstruir si el resumen la deforma. Seis mensajes son los tres últimos pasos (cada paso añade el del modelo y el de la herramienta). No hemos ajustado el 6 |
+| Dónde cortar | Lo que se conserva nunca empieza por un resultado de herramienta; si el corte cae ahí, se retrocede | Un resultado sin la llamada que lo pidió no se entiende. Es una precaución: no hemos comprobado qué hace la plantilla de Qwen con un mensaje `tool` suelto |
+| Qué ve el resumidor | Los mensajes viejos, con cada resultado de herramienta recortado a 1500 caracteres | Los pasajes son lo que más ocupa y lo que menos hace falta literal en un resumen. Solo se recorta lo que se resume: los mensajes vivos no se tocan |
+| Quién resume | El mismo cerebro, con `SUMMARY_PROMPT` y sin bloque de razonamiento | No añade modelos. Un resumen no necesita razonar y gastaría tokens. Si el modelo no devuelve nada utilizable (por ejemplo un `<think>` cortado por el límite de tokens) se usan los primeros 1000 caracteres del historial, para no perderlo todo |
+| Qué se hace con el resumen | Se añade al anterior y va en el mensaje de sistema | Mecánica dada |
+
+Para comprobar la mecánica sin cargar ningún modelo, `tests/test_react_agent.py` cambia `generate`
+por una función que devuelve respuestas fijadas de antemano (`uv run pytest tests/test_react_agent.py`).
+
+Después lo miramos con modelos reales: `uv run python -m agent.check_summary base thinking` resume
+una llamada a `search_knowledge_base` con su resultado real (la pregunta de la cefotaxima, `top_k = 5`)
+con cada cerebro y mide el tiempo, y luego llena una memoria con ese mismo resultado tres veces para
+ver que `compress` se dispara. Ese script crea su propia memoria, con `pin_first=True` puesto a mano:
+comprueba el mecanismo, no que el agente lo active (eso lo comprueba un test de `run`).
+
+**Qué pasó.**
+
+| Qué | Tokens | Caracteres |
+|---|---|---|
+| Prompt de sistema con las herramientas | 1699 | 6380 |
+| Observación de `search_knowledge_base`, `top_k = 5` (mediana, mín.–máx.) | 1097 (851–1361) | 3471 (2825–3978) |
+| Observación de `search_knowledge_base`, `top_k = 3` (mediana, mín.–máx.) | 676 (570–822) | 2140 (1877–2457) |
+| Observación de `search_medication_cima` (cefotaxima, 5 resultados) | 454 | 1084 |
+
+Con el presupuesto de 6000 tokens que traía el proyecto, el prompt más cuatro búsquedas medianas
+suman 1699 + 4 · 1097 = 6087, y eso sin contar lo que escribe el modelo en cada paso, que con
+`thinking` incluye el bloque `<think>`. Lo que llena la memoria son los pasajes recuperados, no los
+mensajes del modelo ni los resultados de las otras herramientas.
+
+En las pruebas con respuestas fijas, la tarea sobrevive a la compresión, el resumidor recibe los
+resultados recortados mientras los mensajes vivos quedan intactos, no queda un resultado suelto al
+principio de lo conservado, y una ejecución con presupuesto pequeño llama al resumidor y termina bien.
+Los dos tests de memoria que venían dados con el proyecto siguen pasando.
+
+Con modelos reales, `compress` se dispara (4255 tokens pasan a 1609 y 7 mensajes a 3; la memoria de
+prueba contiene tres veces el resultado más grande de las 20 preguntas, 1361 tokens y 3978
+caracteres, y con la mediana habría unos 3460 tokens) y la tarea se conserva, pero los resúmenes tienen errores. El de `base` (45 s, 452 caracteres) habla de la dosis
+de **ceftriaxona** como si fuera la respuesta a la pregunta, que era sobre cefotaxima. El de
+`thinking` (132 s, 1633 caracteres) organiza la información por fármaco, pero atribuye a la cefotaxima
+la frase de que solo en insuficiencia renal preterminal se limita a 2 g diarios, que el pasaje
+recuperado dice de la ceftriaxona. Además añade secciones de cefuroxima y cefazolina; no hemos
+comprobado si salen de los pasajes recuperados. Los tiempos son altos para un solo resumen, con el
+modelo ya cargado y la GPU libre de nuestras pruebas, y no los entendemos: una tarea completa de tres
+pasos con `base` tardó 9 s en otra prueba. Puede deberse a que la GPU es compartida, pero no lo hemos
+comprobado.
+
+**Qué concluimos.** La política tiene una justificación, pero ninguna decisión está medida: no sabemos
+si comprimir mejora la tasa de éxito, y los resúmenes que revisamos a mano tienen errores (arriba), así que no podemos dar por buena la compresión sin medirla. La
+compresión no puede dispararse antes del cuarto paso (hacen falta más de 6 mensajes anteriores a los
+conservados, a razón de dos por paso) y, con búsquedas medianas y un presupuesto de 6000, tampoco se pasa
+el presupuesto antes de la cuarta, así que en tareas cortas no se ve. Para evaluarla en el banco habrá que incluir tareas largas o bajar el presupuesto, y
+comparar sin compresión, con compresión, y varios valores de `obs_chars` y `keep_last`.
+
+La política tiene límites. Recortar a 1500 caracteres deja, para el resumidor, un 43 % de una
+observación mediana de `top_k = 5` (unos dos pasajes de cinco). Como el retriever ordena por puntuación
+esto conserva los mejores, pero su Recall@5 es de 0.64 en las medidas de la fase 3 y la evidencia puede
+estar en el tercer pasaje o más abajo, que el resumen no verá. Los resúmenes consumen tokens y tiempo, y
+cuentan en `tokens_used`. El resumen acumulado crece con cada compresión y no tiene tope. Un modelo
+pequeño puede perder cifras al resumir. Y las medidas de tamaño son de 20 preguntas con un solo
+tokenizador.
+
+---
+
+### 2026-11-03 · Fase 4 · Formato de las llamadas: reparar, reintentar y parar
+
+**Qué queríamos saber.** El prompt pide que el modelo escriba una llamada a herramienta entre
+`<tool_call>` y `</tool_call>`. Queríamos saber si los modelos lo hacen bien y qué debe hacer el bucle
+cuando no.
+
+**Qué hicimos.** Fuimos añadiendo reglas en `ReActAgent` a medida que veíamos fallos en ejecuciones
+reales:
+
+- **Reparar la etiqueta.** Si hay más `<tool_call>` que `</tool_call>`, se añade el cierre antes de
+  leer la salida y antes de guardarla en memoria.
+- **Reintentar una vez.** Si no hay ninguna llamada válida, se añade a la traza un paso con el motivo
+  (el error del parser o "no tool call found") y se le dice al modelo, como mensaje de usuario, que
+  responda con un bloque `<tool_call>` o llame a `final_answer`. El aviso gasta un paso de
+  `max_steps`. Si falla otra vez seguida, se acepta lo que escribió, se marca `succeeded=False` y como
+  `final_answer` se usa el texto fuera de `<think>` y de los bloques (o, si no hay, el razonamiento).
+- **Parar al cerrar la llamada.** `generate` pasa `stop_strings=["</tool_call>"]` a
+  `model.generate`.
+- **Ejecutar solo la primera llamada** de cada turno, como pide el prompt ("exactly one tool").
+
+**Qué pasó.** Con `base`, en tres tareas de prueba, dos murieron en el primer intento: una por escribir
+`Action: search_medication_cima` en texto plano, sin bloque, y otra porque el modelo cerró el JSON pero
+paró antes de escribir `</tool_call>`, algo que vimos en el texto crudo y que no es un truncamiento
+(la salida era corta, y en el paso anterior la etiqueta sí estaba). La reparación resuelve el segundo
+caso. El reintento no resolvió el primero: en la pregunta de la cefotaxima, `base` volvió a escribir
+`Action: ...` en texto plano, y además dijo que la herramienta "was called, but no results were
+returned", cuando no se había llamado.
+
+Con `thinking` el formato era correcto, pero el modelo seguía escribiendo después de su llamada un
+`Observation:` inventado con resultados falsos, y a veces otra llamada o un `final_answer` completo.
+Todo eso quedaba en la memoria como si lo hubiera visto, y en un caso la generación llegó a los 1024
+tokens inventando la observación. Con la parada en `</tool_call>`, las dos generaciones que pudimos
+ver completas en la siguiente ejecución terminaron justo al cerrar la llamada, y la observación que veía el modelo era la
+real de CIMA. Con `rlm`, que se entrenó para `<think>...<answer>`, el formato falló en la prueba
+que hicimos ("12 por 7"): razonó bien y llegó a 84, pero escribió
+`<tool_call>{"final_answer": "84"}</tool_call>`, sin `name` ni `arguments`.
+
+**Qué concluimos.** La reparación y la parada son baratas y quitan fallos concretos. El reintento ayuda
+poco con los modelos pequeños, porque no recibe ningún ejemplo de cómo es una llamada correcta. No
+medimos la tasa de éxito con y sin cada regla: son casos sueltos que motivaron cada cambio. Dos
+cosas que deben quedar claras para interpretar resultados: la reparación cambia la salida del modelo
+antes de guardarla y la traza no lo refleja; y `succeeded=False` no significa que la respuesta sea
+mala, solo que no cerró con `final_answer`, como el 84 de `rlm`. Si en el futuro se quieren llamadas en
+paralelo, la parada en el primer `</tool_call>` hay que cambiarla. El plan es medir en el banco el
+efecto de la reparación y del reintento, y probar un ejemplo en el prompt.
+
+---
+
+### 2026-11-03 · Fase 4 · Reglas del prompt, razonamiento por cerebro y tokens
+
+**Qué queríamos saber.** Qué instrucciones darle al agente (idioma, uso de la base de conocimiento,
+citas), si cada cerebro debe razonar, y cómo contar los tokens que gasta una tarea.
+
+**Qué hicimos.** Decisiones y valores:
+
+- **`enable_thinking`:** `False` para `base` y `True` para `rlm` y `thinking`. Con `False` la plantilla
+  de Qwen3 pone un bloque de razonamiento vacío; es lo que usan `/rag` y el ejecutor de la fase 2 con
+  el modelo sin entrenar, y `tool_use/evaluate.py` lo fuerza a `True` con el adaptador porque se
+  entrenó para abrir `<think>` él mismo. `base` y `rlm` siguen esa convención. `thinking` no: es un
+  Qwen3-1.7B sin entrenar y le dejamos razonar porque ese cerebro existe para eso. Es decisión nuestra
+  y no la hemos contrastado con `False`. Para los resúmenes se desactiva siempre (parámetro
+  `thinking=False` de `generate`).
+- **`MAX_NEW_TOKENS = 1024`** por generación. Es un valor elegido a mano (en `/rag` es 1536); no lo
+  hemos ajustado.
+- **Reglas del prompt** (`agent/prompts.py`), añadidas en tres pasos, cada uno después de ver una
+  ejecución con `thinking`: (1) razonar y responder en español, y usar nombres de fármacos en español
+  en los argumentos; (2) para preguntas clínicas consultar `search_knowledge_base` antes de responder,
+  basarse solo en los pasajes, citar sus ids y, si no responden a la pregunta, decirlo en
+  `final_answer` en vez de contestar con conocimiento propio; (3) ampliar el español a todos los
+  argumentos, incluidas las consultas de búsqueda.
+- **`tokens_used`:** suma de los tokens de prompt y de los generados en todas las llamadas al modelo de
+  la tarea, incluidos los resúmenes de la memoria, con el tokenizador del cerebro usado. Como el prompt
+  se reenvía entero en cada paso, crece más que lineal con los pasos. No lo hemos contrastado con lo
+  que espera `agent/evaluate.py`, que solo promedia el campo.
+
+**Qué pasó.** Con `thinking` y la pregunta de la cefotaxima: sin reglas, llamó a CIMA con `cefotaxime`
+(en inglés) y no encontró nada; con la regla del español, usó `cefotaxima` y CIMA devolvió las
+presentaciones; con la regla de la base de conocimiento, buscó en ella primero y no repitió la llamada
+a CIMA. El razonamiento interno (`<think>`)
+sigue en inglés en `thinking`. En las respuestas que vimos, ninguno citó un id. Todo eso son
+casos con una sola pregunta, y cada cambio lo decidimos mirando la ejecución anterior.
+
+**Qué concluimos.** Las reglas de idioma y de uso de la base de conocimiento cambiaron lo que vimos en esa
+pregunta (el argumento de CIMA pasó a ser correcto y el modelo consultó primero la base de conocimiento), pero
+la de las citas no ha hecho que ningún modelo cite un id. Hemos
+ajustado el prompt a una sola pregunta, así que no sabemos cuánto de lo observado es mejora real:
+siguiendo la indicación de `agent/prompts.py`, cada cambio debe medirse en el banco de tareas, con y
+sin la regla. Los tokens de los distintos cerebros son comparables en la medida en que sus
+tokenizadores lo sean; no lo hemos verificado.
+
+---
+
+### 2026-11-10 · Fase 4 · Banco de tareas: diseño, comprobador y validación
+
+**Qué queríamos saber.** Cómo medir al agente con tareas que obliguen a usar al menos dos herramientas y
+cuya respuesta final se pueda comprobar sin leerla a mano, y si el banco que escribíamos era fiable
+antes de gastar GPU en él.
+
+**Qué hicimos.** Escribimos 25 tareas en `agent/bench/tasks.jsonl`: 20 principales (cada una necesita al
+menos dos herramientas distintas) y 5 de borde (`"core": false`), que se miden aparte y no entran en la
+tasa de éxito. Las principales son de cinco tipos: cálculo a partir de una ficha (t01–t09), cálculo con
+cambio de unidades o elección de un valor de un rango (t10–t13), concentración sacada de CIMA en vivo
+(t14, t15), combinación de dos fichas (t16–t18) y tres o cuatro cálculos seguidos (t19, t20). Las de
+borde son: medicamento que no está en el corpus (t21, t22), hoja PDF que el agente bloquea por pedir
+confirmación (t23), conversión imposible sin la concentración (t24) y medicamento que no existe en
+CIMA (t25). El dato clínico de cada tarea sale de una ficha del corpus (13 de las 47) y se guarda como
+pasaje literal en `evidence`; los pesos, las concentraciones y la pregunta son inventados. La
+aritmética que da cada número esperado está en `answer_exprs`.
+
+Corregimos el comprobador de `agent/evaluate.py`. El original quitaba las comas antes de buscar el
+número, así que "7,5 mg/kg" se leía como 75 y "1.050" como 1,05. Ahora lee `7,5` como 7,5, `2.310` y
+`2,310` como 2310, y `1.050` como 1,05 o 1050 (el texto no dice cuál de los dos es). Añadimos las
+comprobaciones `all`, `any` y `negate` (para exigir que el agente no dé ninguna dosis en las tareas
+imposibles) y separamos las tareas de borde en el resumen. También cambiamos el bucle para guardar el
+JSON después de cada cerebro y mostrar una línea por tarea: la primera ejecución falló en `rlm` por no
+tener `ARCA_RLM_ADAPTER` y se perdieron los resultados de `base`, que ya habían terminado.
+
+`uv run python -m agent.validate_bench` comprueba la estructura, que `answer_exprs` dé el valor del
+`check`, que las herramientas existan y que cada `evidence` siga literalmente en `rag/corpus/`; hay que
+repetirlo cada vez que se vuelva a descargar el corpus, porque CIMA actualiza las fichas. Con
+`--retrieval` mira además cuántos pasajes de evidencia llegan al top-5 del retriever de la fase 3
+(recursivo e híbrido, λ = 0,4). Tests en `tests/test_agent_bench.py`.
+
+**Qué pasó.** El banco pasa la validación (25 tareas, 20 principales) y los tests. Con `--retrieval`, solo
+en 7 de las 20 principales llegan al top-5 todos los pasajes de evidencia (t01, t04, t05, t06, t07, t12,
+t14). En t03, t08, t16, t18 y t19 llega una parte, y en t02, t09, t10, t11, t13, t15, t17 y t20 no llega
+ninguno.
+
+**Qué concluimos.** El banco es utilizable, con tres cautelas. Primera: el `check` numérico acepta
+cualquier número de la respuesta que coincida, así que con valores pequeños (un 2 o un 4) un modelo
+puede acertar por casualidad; por eso cada fila guarda `required_tools_used` y el análisis distingue el
+éxito "fiel". Segunda: t14 y t15 dependen de la API de CIMA. Tercera: los 7/20 del retriever son un
+suelo, porque el validador exige que el pasaje esté entero en un solo chunk, y uno partido justo por el
+medio cuenta como no encontrado aunque se haya recuperado. Aun así, encaja con lo que vimos en la
+fase 3: los fallos se concentran en secciones de posología, y desde que los encabezados del corpus no
+llevan el nombre del fármaco los chunks tampoco lo llevan. Hipótesis que no hemos probado: anteponer el
+título de la ficha a cada chunk en `rag/chunking.py` y repetir `rag.evaluate`.
+
+---
+
+### 2026-11-10 · Fase 4 · Primera evaluación de los tres cerebros en el banco
+
+**Qué queríamos saber.** Cuántas de las 20 tareas principales resuelve cada cerebro (`base`, `rlm`,
+`thinking`) y, si son pocas, por qué.
+
+**Qué hicimos.** Una ejecución por tarea y cerebro, sin repeticiones, con el agente tal como estaba en la
+rama `main`:
+
+```
+export ARCA_RLM_ADAPTER=rlm/weights/final_rlm_lora_sin_kl
+export ARCA_RLM_ADAPTER_REPO=isamorell/dgm-arca-rlm-lora-sin-kl
+uv run python -m agent.evaluate --bench agent/bench/tasks.jsonl --brains base rlm thinking
+uv run python -m agent.analyze_eval --markdown reports/phase4_analysis.md
+```
+
+`base` es Qwen3-0.6B, `rlm` es ese modelo con el adaptador GRPO sin KL y `thinking` es Qwen3-1.7B.
+`agent/analyze_eval.py` lee `reports/phase4_eval.json` y, además de la tasa de éxito, saca el éxito
+"fiel" (correcto y con las herramientas requeridas), los pasos sin llamada válida, las respuestas vacías,
+el uso de la base de conocimiento y una clasificación de cada fallo en una sola clase. Resultados
+completos en `reports/phase4_eval.json` y `reports/phase4_analysis.md`.
+
+**Qué pasó.**
+
+| | base | rlm | thinking |
+|---|---|---|---|
+| Éxito, 20 tareas principales | 0/20 | 0/20 | 2/20 |
+| Éxito fiel | 0/20 | 0/20 | 1/20 |
+| Casos de borde acertados | 0/5 | 0/5 | 1/5 |
+| Llegan a `final_answer` | 3/20 | 10/20 | 15/20 |
+| Respuestas vacías | 0/20 | 9/20 | 0/20 |
+| Pasos sin llamada válida | 30/58 | 23/34 | 22/50 |
+| Usa la base de conocimiento (si la necesita) | 0/18 | 1/18 | 4/18 |
+| Pasos medios · tokens medios | 2,9 · 6103 | 1,7 · 4431 | 2,5 · 7728 |
+
+Por clase de fallo (de 20): `base` no llega a dar una respuesta en 17 y responde sin las herramientas
+necesarias en 3. `rlm` no llega en 10, llama a `final_answer` sin respuesta en 9 y responde sin
+herramientas en 1. `thinking` no llega en 5, responde sin las herramientas necesarias en 12 y usa las
+herramientas pero se equivoca en 1.
+
+Los tres aciertos de `thinking` no valen lo mismo. t10 es el único hecho como se espera: buscó en la
+base de conocimiento, calculó con `dose_calculator`, convirtió con `convert_units` y respondió 10,5 mg/h.
+t13 (4 mL de furosemida) acertó sin ninguna herramienta, probablemente de memoria. t24 es un caso de
+borde en el que basta con reconocer que falta la concentración. Las respuestas sin herramientas son en su
+mayoría inventadas: 800 mg de gentamicina en vez de 480 (t01), 5200 mg de tobramicina en vez de 325
+(t09), 49 000 mg de linezolid en vez de 8400 (t17). En t25 dijo que Zorbaxil lleva "25 mg por
+comprimido", y en t23 dijo que la hoja de preparación se había generado cuando el agente la bloquea.
+En t04 `thinking` llegó a 0,8 mL, que es correcto, pero dentro de un `Action: {"name": "final_answer", …}`
+escrito como texto y no como `<tool_call>`; al no cerrar con `final_answer` cuenta como fallo. Si se
+ignorara `succeeded`, `thinking` subiría a 3/20 y los otros dos seguirían en 0. `rlm` repite algo parecido
+a lo que vimos con el "12 por 7": llama a `final_answer` con `{}` en 9 de las 20 tareas y el agente lo da por
+bueno (`succeeded=True`, respuesta vacía).
+
+**Qué concluimos.** Estamos en el suelo del banco, así que esta ejecución no permite decir si haber
+entrenado `rlm` ayuda cuando el modelo actúa: con 20 tareas, 2 aciertos son un 10 % y la diferencia con
+0 es de dos tareas, en una sola ejecución. Lo que sí muestran los datos es que el cuello de botella no
+es el razonamiento ni el retriever, sino el formato y el uso de herramientas: más de la mitad de los
+pasos de `base` y `rlm` no contienen una llamada válida (en esa cifra entran los pasos de aviso que
+añade el propio agente al reintentar), `rlm` deja la respuesta vacía en casi la mitad de las tareas, y
+los tres casi no consultan la base de conocimiento (0, 1 y 4 de las 18 tareas que la necesitan). Cosas
+a probar, ninguna probada todavía: aceptar o reforzar con un ejemplo el formato `Action:` que escriben
+los modelos, tratar un `final_answer` sin `answer` como llamada inválida para que el modelo reintente, y
+repetir la evaluación con esos cambios para ver si sube la tasa. Los números no se pueden comparar con
+los de la fase 2, que usaban otras tareas.
+
+---
+
+### 2026-11-11 · Fase 4 · Aceptar `Action:`, avisar al modelo y no dar por buena una respuesta vacía
+
+**Qué queríamos saber.** Si arreglar los dos fallos de formato que vimos en la primera evaluación (los
+modelos escriben `Action: nombre` en vez del bloque `<tool_call>`, y `rlm` llama a `final_answer` sin
+respuesta y el agente lo da por bueno) sube la tasa de éxito en las 20 tareas principales.
+
+**Qué hicimos.** Tres cambios en `agent/`, todos medidos juntos, sin probar cada uno por separado:
+
+- **Aviso cuando no hay llamada.** Si la salida no trae ninguna llamada válida, el agente le manda al
+  modelo un mensaje que dice que no escriba `Action: nombre` y le recuerda cómo es el bloque
+  `<tool_call>` correcto. Solo se avisa una vez seguida: si falla otra vez, el agente termina.
+- **`Action: nombre` como último recurso.** Antes de avisar, si no hay bloque
+  `<tool_call>` válido, el agente busca `Action: nombre` en el texto que queda fuera de `<think>`. Solo
+  acepta nombres que estén en el registro de herramientas; si hay varios usa el último, y si detrás hay
+  un objeto JSON lo toma como argumentos (si no, los argumentos van vacíos). Lo hemos puesto por si el
+  modelo lo escribe así, pero creemos que no debería darse por válido: la forma correcta es solo el bloque
+  `<tool_call>`, y esto es una concesión a los modelos pequeños, no un formato que queramos fomentar.
+- **`final_answer` vacío cuenta como fallo.** Si `answer` está vacío o en blanco, no se toma como
+  respuesta: la primera vez se le avisa y reintenta, y si se repite el agente termina con
+  `succeeded=False` y respuesta vacía.
+
+Además hemos añadido una regla al principio de las reglas del prompt (`agent/prompts.py`): "The only valid
+way to act is the `<tool_call>` block above. Do not write "Action: tool_name" on its own: it is not
+executed", con el ejemplo de `final_answer` y la indicación de no dejar `answer` vacío. Y `agent/evaluate.py`
+ahora carga el `.env` con `load_dotenv()`, porque antes `rlm` se saltaba con "needs ARCA_RLM_ADAPTER to be
+set" aunque estuviera definido ahí. Misma evaluación que la entrada anterior, una ejecución por tarea y
+cerebro:
+
+```
+uv run python -m agent.evaluate --bench agent/bench/tasks.jsonl --brains base rlm thinking
+uv run python -m agent.analyze_eval --markdown reports/phase4_analysis.md
+```
+
+**Qué pasó.** Entre paréntesis, el valor de la primera evaluación.
+
+| | base | rlm | thinking |
+|---|---|---|---|
+| Éxito, 20 tareas principales | 1/20 (0) | 1/20 (0) | 5/20 (2) |
+| Éxito fiel | 0/20 (0) | 0/20 (0) | 1/20 (1) |
+| Casos de borde acertados | 0/5 (0) | 0/5 (0) | 2/5 (1) |
+| Llegan a `final_answer` | 14/20 (3) | 19/20 (10) | 18/20 (15) |
+| Respuestas vacías | 0/20 (0) | 0/20 (9) | 0/20 (0) |
+| Pasos sin llamada válida | 3/63 (30/58) | 5/27 (23/34) | 11/60 (22/50) |
+| Usa la base de conocimiento (si la necesita) | 3/18 (0) | 1/18 (1) | 10/18 (4) |
+| Pasos medios · tokens medios | 3,1 · 6819 | 1,4 · 3715 | 3,0 · 9644 |
+
+Por clase de fallo, en las 20 tareas principales:
+
+| Clase de fallo | base | rlm | thinking |
+|---|---|---|---|
+| No llega a dar una respuesta (se agotan los pasos o no hay llamada válida) | 6/20 | 1/20 | 2/20 |
+| Llama a `final_answer` pero sin respuesta | 0/20 | 0/20 | 0/20 |
+| Responde sin usar las herramientas necesarias | 13/20 | 18/20 | 10/20 |
+| Usa las herramientas necesarias pero el resultado es incorrecto | 0/20 | 0/20 | 3/20 |
+
+El único acierto de `rlm` (t14) no usó las herramientas requeridas, por eso su éxito fiel es 0. Los resultados completos están en `reports/phase4_eval.json` y
+`reports/phase4_analysis.md`.
+
+**Qué concluimos.** Los cambios arreglan lo que pretendían: las respuestas vacías de `rlm` pasan de 9 a
+0, casi todas las ejecuciones terminan con una respuesta (de 3, 10 y 15 de 20 a 14, 19 y 18) y los pasos
+sin llamada válida bajan mucho en `base` y `rlm`. Pero el éxito sube poco (de 0, 0 y 2 a 1, 1 y 5 de 20)
+y los modelos siguen fallando la mayoría de las veces, ya no por el formato sino porque responden sin
+usar las herramientas necesarias (13, 18 y 10 de 20). `rlm` casi siempre contesta en un solo paso sin
+buscar nada, así que el adaptador no mejora aquí el uso de herramientas respecto a `base`. Límites: es una
+sola ejecución por cerebro, con 20 tareas una diferencia de una o dos tareas no es una diferencia fiable
+(`thinking` ya varió entre ejecuciones durante estas pruebas), no sabemos cuánto aporta cada uno de los
+tres cambios, y que `Action: nombre` se acepte hace que el agente tolere una salida que consideramos
+incorrecta. Falta probar un ejemplo completo en el prompt (buscar en la base de conocimiento, calcular y
+`final_answer`) y medir si los modelos empiezan a usar las herramientas.
+
+---
