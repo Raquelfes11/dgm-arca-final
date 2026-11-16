@@ -2427,3 +2427,93 @@ incorrecta. Falta probar un ejemplo completo en el prompt (buscar en la base de 
 `final_answer`) y medir si los modelos empiezan a usar las herramientas.
 
 ---
+
+### 2026-11-16 · Proyecto final · #01 Formato de las llamadas: `Action:` con JSON y un ejemplo en el prompt
+
+**Qué queríamos saber.** Si leer también `Action: {"name": ..., "arguments": {...}}` (el JSON entero
+detrás de `Action:`, que es lo que escribe `thinking` en t09 y t20 y que el fallback de la entrada del
+11-11 no leía, porque solo aceptaba `Action: nombre`) y añadir al prompt un ejemplo completo de una
+ejecución reducen los pasos sin llamada válida.
+
+**Qué hicimos.** Tres cambios en la rama `fix_01_parser_action`, medidos juntos:
+
+- **Parser.** `_action_line_fallback` en `agent/react_agent.py` acepta ahora dos formas: `Action:
+  nombre` (con argumentos opcionales en un JSON detrás) y `Action: {"name": ..., "arguments": {...}}`
+  (también con `parameters`). Siguen valiendo solo los nombres que estén en el registro, solo el texto
+  fuera de `<think>` y, si hay varias, la última. Como en la entrada del 11-11, lo consideramos una
+  concesión a los modelos pequeños y no un formato que queramos fomentar.
+- **Ejemplo en el prompt.** `agent/prompts.py` lleva ahora una ejecución completa con un fármaco
+  inventado ("farmacoejemplo"): buscar en la base de conocimiento, calcular con `dose_calculator` y
+  cerrar con `final_answer` citando el id. Además hemos quitado de las reglas la frase "Do not write
+  "Action: tool_name" on its own: it is not executed", porque con el fallback ya no era cierta (el
+  agente sí lo ejecuta). La regla ahora dice solo que se actúe siempre con el bloque `<tool_call>`.
+- **Tests.** 11 tests nuevos en `tests/test_react_agent.py` (las dos formas, `parameters`, herramientas
+  que no existen, JSON roto, texto dentro de `<think>`, la última `Action` gana, una ejecución completa
+  con `Action: {json}` y que el prompt se formatea bien con las llaves del ejemplo). `uv run pytest`:
+  303 en verde; `tests/test_api.py` necesita `ARCA_RLM_BASE_MODEL` en el entorno porque carga el modelo
+  de verdad.
+
+Evaluación: `thinking` (Qwen3-1.7B), una ejecución, solo t04, t09 y t20, que son las que tenían el
+`Action:` con JSON o fallos de formato en la primera evaluación. Tres versiones del código sobre las
+mismas tareas: ARCA original (`reports/phase4_eval.json`), `main` con el arreglo del 11-11
+(`reports/fix01_control_main.json`) y la rama con #01 (`reports/fix01_check.json`).
+
+```
+uv run python -m agent.evaluate --brains thinking --ids t04 t09 t20 --out reports/fix01_check.json
+uv run python -m agent.analyze_eval --report reports/fix01_check.json --no-grid
+```
+
+**Qué pasó.** Las tres columnas son el mismo cerebro y las mismas tres tareas; solo cambia el código.
+
+| | ARCA original | `main` (arreglo del 11-11) | #01 |
+|---|---|---|---|
+| Éxito | 1/3 | 1/3 | 1/3 |
+| Éxito fiel | 0/3 | 1/3 | 1/3 |
+| Llegan a `final_answer` | 1/3 | 2/3 | 3/3 |
+| Pasos sin llamada válida | 5/7 | 2/8 | 0/11 |
+| Pasos medios | 2,3 | 2,7 | 3,7 |
+| Tokens medios | 6.577 | 9.515 | 13.949 |
+
+Por tarea:
+
+- **t04** (0,8 mL): acierta en las tres. En ARCA original acertó sin llamar a `dose_calculator` (la
+  respuesta estaba en un `Action:` escrito como texto); en `main` y con #01 busca y calcula. En `main`
+  además intentó `create_preparation_sheet`, que el agente bloquea. Con #01 cita `[cc1d1324d0-0028]`,
+  que es un pasaje sobre la dilución IV y no el de la dosis (el `-0074`, que también recuperó, sí habla
+  de 1 mg/kg cada 12 h en angina inestable).
+- **t09** (325 mg): falla en las tres, y en ninguna llega al pasaje "hasta 5 mg/kg/día" (en
+  `validate_bench --retrieval` t09 ya estaba entre las que no traen ninguna evidencia al top-5). En
+  `main` el modelo contesta que la dosis exacta no está en la base de conocimiento. Con #01 contesta 195
+  mg (3 mg/kg/día de la Tabla 1, la dosis habitual, no la máxima) y cita un pasaje que no la contiene.
+- **t20** (3,2 / 4 / 0,8 / 16 mL): en `main` la tarea termina a los 2 pasos: el modelo escribe `Action:
+  {"name": "search_medication_cima", ...}`, se descarta como "(no tool call)" y falla. Con #01 esa
+  llamada se ejecuta y la tarea llega a `final_answer` en 6 pasos, pero con la respuesta equivocada:
+  busca solo la ketamina, calcula 16 mL con una concentración de 10 mg/mL que no sale de ninguna ficha
+  (la ficha dice 50 mg) y da 8 mL, 0,8 mL y 1 mL para furosemida, enoxaparina y aciclovir sin haberlos
+  buscado (solo el de enoxaparina coincide con el esperado). Cita ids de ketamina para furosemida y
+  aciclovir.
+
+**Qué concluimos.** El parser hace lo que queríamos: en t20 pasa de una llamada descartada a una llamada
+ejecutada, y en las tres tareas ya no queda ningún paso sin llamada válida (de 2 de 8 a 0 de 11). Pero
+el éxito no sube (1/3 en las dos versiones), porque los fallos que quedan no son de formato: en t09 el
+retriever no trae el pasaje, y en t20 el modelo busca un solo fármaco e inventa el resto. El aumento
+medio de tokens (de 9.515 a 13.949) viene casi todo de t20, que ya no se para a los 2 pasos (de 6.017 a
+24.895); en t04 y t09 #01 gasta lo mismo o menos (de 16.101 a 10.980 y de 6.426 a 5.971). El ejemplo
+suma unos 150 tokens por generación (estimado, no medido).
+
+Lo que no sabemos es qué aporta el ejemplo del prompt, y hay una señal que hay que mirar: en t09 `main`
+dice que la base no tiene el dato y #01 da una cifra equivocada con una cita, y en este dominio una
+respuesta equivocada con aspecto fiable es peor que no responder. Con una ejecución por tarea no se
+puede decir que el ejemplo empuje a contestar siempre; es la hipótesis a descartar. Tampoco hemos
+probado el parser y el ejemplo por separado, y la sola variación entre ejecuciones de `thinking` ya es
+del orden de lo que hemos medido (3 tareas).
+
+Cosas a probar: repetir con y sin ejemplo sobre el banco completo y con repeticiones (#11), y si el
+ejemplo no ayuda o empuja a inventar, quitarlo o dejarlo detrás de un interruptor. También hemos
+cambiado una regla que añadió Teresa en la entrada del 11-11 (quitar la frase de "no se ejecuta"), así
+que hay que decidir entre las tres si el prompt debe seguir desaconsejando `Action:` de forma explícita.
+De paso, esta ejecución apunta a otros cambios de la lista: t09 al retriever (#05, #06), t20 a buscar en
+la base para cada fármaco (#04), las citas con ids de otro fármaco a #25 y el intento de
+`create_preparation_sheet` de t04 a #03 y #27.
+
+---
