@@ -2678,3 +2678,60 @@ repeticiones (#11), teniendo en cuenta que la generación es determinista y que 
 muestreo para que las repeticiones midan algo.
 
 ---
+
+### 2026-11-16 · Proyecto final · #04b Comprobador de los casos de borde que deben rechazar
+
+**Qué queríamos saber.** En la entrada del #04 vimos que el comprobador daba 1/5 en los casos de borde
+de los tres brazos, pero que al leer las respuestas había rechazos correctos que se daban por malos
+(t21 y t22 en `auto`, t21 y t25 en `tool`). Queríamos saber cuánto cambia el resultado si el comprobador
+reconoce las formas normales de decir "esto no está en la base" y sigue rechazando las respuestas
+inventadas.
+
+**Qué hicimos.** Cuatro cambios en la rama `fix_checker_refusals`:
+
+- **Expresión de rechazo de t21, t22 y t25** (`agent/bench/tasks.jsonl`). Antes solo reconocía "no se
+  encuentra", "no hay", "no dispone" y parecidas, y no "no se encontró", "no está especificada", "no
+  proporciona", "no menciona", "no indica" ni "no tengo". La nueva las incluye. La condición de que no
+  haya números de mg (t21 y t25) no cambia.
+- **t22.** Además de rechazar, la respuesta no puede dar ninguna duración (días, semanas, meses, años u
+  horas), no solo los 28 días. Si no, "no consta, pero se conserva 2 años" pasaría por un rechazo.
+- **`agent/rescore.py`.** Puntúa de nuevo un informe con el banco actual sin ejecutar ningún modelo
+  (los informes guardan las respuestas finales): cambian `correct` y `check` de cada fila y los
+  resúmenes, y el resto (pasos, herramientas, tokens) se queda como estaba. Para eso se ha sacado de
+  `agent/evaluate.py` la función `summarise_brain`, que usan los dos. Sirve para cada vez que cambiemos
+  el comprobador, por ejemplo con la comprobación numérica estricta (#09).
+- **Tests.** 3 nuevos: las formas de rechazar pasan, las respuestas inventadas no pasan (con
+  una dosis de mg en t21 y t25, y una duración en t22) y `rescore` funciona sobre un informe de
+  prueba.
+
+```
+uv run python -m agent.rescore --report reports/fix04_solo.json
+uv run python -m agent.rescore --report reports/fix04_tool.json
+uv run python -m agent.rescore --report reports/fix04_auto.json
+```
+
+**Qué pasó.** Las tareas principales no cambian (el comprobador de esas es otro) y los casos de borde
+sí:
+
+| | solo | herramienta | automática |
+|---|---|---|---|
+| Casos de borde antes | 1/5 | 1/5 | 1/5 |
+| Casos de borde después | 1/5 | 3/5 | 3/5 |
+| Tareas de borde acertadas | t24 | t21, t24, t25 | t21, t22, t24 |
+| Éxito en las 20 principales | 2/20 | 5/20 | 9/20 |
+
+Las respuestas inventadas siguen fallando: `solo` da 40 mg de omeprazol en t21 y 250 mg de zorbaxil en
+t25, `tool` dice que la insulina se conserva 2 años (t22) y `auto` mezcla en t25 un "no está en CIMA"
+(que no ha consultado) con los mg de otro fármaco. t23 (hoja PDF bloqueada) sigue sin acertar en
+ningún brazo.
+
+**Qué concluimos.** El resultado del #04 en los casos de borde estaba infravalorado por el comprobador,
+no por el modelo. Con la corrección, tener la base de conocimiento ayuda a rechazar lo que no está
+(`tool` y `auto` 3/5 frente a 1/5 de `solo`), y `auto` es el único que rechaza t22 en vez de inventar.
+Con cinco tareas, una ejecución y un comprobador que sigue siendo una expresión regular, son diferencias
+de una o dos tareas y no una medición. Lo que no se ha arreglado: t25 con `auto` y t23, que son el
+riesgo de que el modelo afirme cosas sobre herramientas que no ha usado (#03, #27). Los informes
+anteriores (`phase4_eval`, `fix01_*`) se hicieron con el comprobador viejo: sus tareas principales se
+pueden comparar, pero sus casos de borde no, salvo que se puntúen de nuevo con `agent.rescore`.
+
+---

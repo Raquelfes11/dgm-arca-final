@@ -112,6 +112,22 @@ def summarise(rows: list[dict]) -> dict:
     }
 
 
+def summarise_brain(rows: list[dict], config: dict | None = None) -> dict:
+    """The entry of one brain in the report: core and edge summaries, per category, the rows."""
+    core = [r for r in rows if r.get("core", True)]
+    edge = [r for r in rows if not r.get("core", True)]
+    categories = sorted({r.get("category", "-") for r in rows})
+    return {
+        "config": config or {},
+        **summarise(core),
+        "edge": summarise(edge),
+        "by_category": {
+            c: summarise([r for r in rows if r.get("category", "-") == c]) for c in categories
+        },
+        "rows": rows,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -184,22 +200,12 @@ def main() -> None:
             results[brain] = {"error": f"{type(error).__name__}: {error}", "rows": rows}
             out.write_text(json.dumps(results, indent=2, ensure_ascii=False, default=list))
             continue
-        core = [r for r in rows if r.get("core", True)]
-        edge = [r for r in rows if not r.get("core", True)]
-        categories = sorted({r.get("category", "-") for r in rows})
-        results[brain] = {
-            "config": {
-                "rag_mode": args.rag_mode,
-                "use_tools": not args.no_tools,
-                "max_steps": args.max_steps,
-            },
-            **summarise(core),
-            "edge": summarise(edge),
-            "by_category": {
-                c: summarise([r for r in rows if r.get("category", "-") == c]) for c in categories
-            },
-            "rows": rows,
+        config = {
+            "rag_mode": args.rag_mode,
+            "use_tools": not args.no_tools,
+            "max_steps": args.max_steps,
         }
+        results[brain] = summarise_brain(rows, config)
         print(
             f"{brain:>9}: success {results[brain]['success_rate']:.2f} "
             f"· steps {results[brain]['mean_steps']:.1f} · edge cases "

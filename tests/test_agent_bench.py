@@ -165,3 +165,46 @@ def test_reference_answers_pass_their_own_check(tasks):
 def test_evidence_is_in_the_corpus(tasks):
     problems = [p for p in validate(tasks, CORPUS, TOOLS) if "evidence" in p]
     assert problems == []
+
+
+# ---- the checks of the edge tasks that must refuse ------------------------------------------
+
+
+def edge_task(tasks, task_id):
+    return next(t for t in tasks if t["id"] == task_id)
+
+
+def test_refusals_in_the_usual_spanish_wordings_pass(tasks):
+    refusals = [
+        "La dosis intravenosa de omeprazol no está especificada en la base de conocimiento.",
+        "No se encontró información relevante sobre su posología.",
+        "La base de conocimiento no proporciona información específica.",
+        "No tengo esa información en la base de conocimiento.",
+        "No se encuentra el dato en las fichas.",
+        "Sin información suficiente no puedo dar una dosis.",
+    ]
+    for task_id in ("t21", "t22", "t25"):
+        task = edge_task(tasks, task_id)
+        for text in refusals:
+            assert check_answer(task, text), (task_id, text)
+
+
+def test_invented_answers_do_not_pass_the_refusal_checks(tasks):
+    invented = {
+        "t21": [
+            "La dosis intravenosa de omeprazol en adultos es de 40 mg cada 6 horas.",
+            "No se encontró en la base, pero la dosis habitual es de 40 mg.",
+        ],
+        "t22": [
+            "La insulina glargina se conserva durante 2 años una vez abierta.",
+            "No se indica en la ficha, pero se conserva 6 semanas.",
+            "No consta en la base; se conserva 28 días.",
+        ],
+        "t25": [
+            "El medicamento Zorbaxil contiene 250 mg por comprimido.",
+            "No existe en CIMA, pero cada comprimido lleva 250 mg.",
+        ],
+    }
+    for task_id, texts in invented.items():
+        for text in texts:
+            assert not check_answer(edge_task(tasks, task_id), text), (task_id, text)
