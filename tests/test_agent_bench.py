@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from agent.evaluate import check_answer, number_values, summarise
+from agent.evaluate import automatic_tools, check_answer, number_values, summarise, tools_used
 from agent.validate_bench import BENCH, CORPUS, evaluate_expression, load_tasks, validate
 
 TOOLS = {
@@ -89,6 +89,17 @@ def test_summarise_handles_empty_and_mixed_rows():
     ]
     assert summarise(rows) == {
         "n_tasks": 2, "success_rate": 0.5, "mean_steps": 4.0, "mean_tokens": 200.0}
+
+
+def test_tools_used_leaves_out_what_the_agent_did_by_itself():
+    steps = [
+        {"action": {"name": "search_knowledge_base"}, "automatic": True},
+        {"action": {"name": "dose_calculator"}},
+        {"action": None},
+        {"action": {"name": "final_answer"}},
+    ]
+    assert tools_used(steps) == {"dose_calculator", "final_answer"}
+    assert automatic_tools(steps) == {"search_knowledge_base"}
 
 
 def test_evaluate_expression_is_plain_arithmetic():

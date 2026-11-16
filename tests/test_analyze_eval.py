@@ -52,6 +52,19 @@ def test_metrics_count_invalid_steps_empty_answers_and_kb_use():
     assert sum(m["failures"].values()) == 2  # the correct task is not a failure
 
 
+def test_automatic_steps_are_not_invalid_steps_and_are_counted_apart():
+    steps = [
+        {"action": {"name": "search_knowledge_base"}, "automatic": True},
+        {"action": None},
+        {"action": {"name": "final_answer"}},
+    ]
+    m = analyse_brain([row("a", steps=steps), row("b")])
+    assert (m["invalid_steps"], m["n_steps"]) == (1, 3)
+    assert m["auto_search"] == 1
+    text = render(analyse({"x": {"rows": [row("a")]}}))
+    assert "Con búsqueda automática previa" in text
+
+
 def test_empty_results_do_not_divide_by_zero():
     m = analyse_brain([])
     assert m["n_core"] == 0 and m["mean_steps"] == 0.0

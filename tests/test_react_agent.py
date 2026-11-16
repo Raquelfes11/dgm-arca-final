@@ -11,11 +11,15 @@ import pytest
 
 from agent.memory import ConversationMemory
 from agent.react_agent import (
+    AUTO_SEARCH_TOP_K,
     MAX_REPEATED_CALLS,
+    MIN_TOP_K,
     ReActAgent,
     _action_line_fallback,
     _resolve_adapter,
+    search_knowledge_base,
 )
+from tool_use.registry import tool
 from tool_use.tools import SHEETS_DIR
 
 
@@ -316,3 +320,87 @@ def test_null_answer_counts_as_empty():
                             tool_call("final_answer", answer="ok")])
     response = agent.run("task", max_steps=5, brain="base")
     assert response.succeeded and response.final_answer == "ok"
+
+
+class FakeRetriever:
+    def __init__(self):
+        self.asked = []
+
+    def search(self, query, top_k):
+        self.asked.append(top_k)
+        return []
+
+
+def test_search_never_returns_fewer_passages_than_the_minimum(monkeypatch):
+    retriever = FakeRetriever()
+    monkeypatch.setattr("agent.react_agent._get_retriever", lambda: retriever)
+    for asked in (1, MIN_TOP_K, 8):
+        search_knowledge_base(query="q", top_k=asked)
+    assert retriever.asked == [MIN_TOP_K, MIN_TOP_K, 8]
+
+
+def agent_with_fake_search(outputs, rag_mode):
+    """A scripted agent with a fake knowledge base tool. Returns it and the calls it received."""
+    calls = []
+
+    @tool
+    def search_knowledge_base(query: str, top_k: int = 5) -> str:
+        """Fake knowledge base search."""
+        calls.append((query, top_k))
+        return "[doc-0001] (ficha.md)\nla dosis es de 1 mg/kg"
+
+    agent = scripted_agent(outputs)
+    agent.rag_mode = rag_mode
+    agent.registry.register(search_knowledge_base)
+    return agent, calls
+
+
+def test_auto_search_runs_before_the_first_step_and_the_model_sees_it():
+    agent, calls = agent_with_fake_search([tool_call("final_answer", answer="ok")], "auto")
+    sent = []
+    generate = agent.generate
+
+    def spy(messages, brain, thinking=None):
+        sent.append(messages)
+        return generate(messages, brain, thinking)
+
+    agent.generate = spy
+    response = agent.run("dosis de enoxaparina", max_steps=1, brain="base")
+    assert calls == [("dosis de enoxaparina", AUTO_SEARCH_TOP_K)]
+    assert response.succeeded and response.final_answer == "ok"
+    assert response.n_steps == 1  # the automatic search did not use up the only step
+    automatic, own = response.steps
+    assert automatic.automatic and automatic.action.name == "search_knowledge_base"
+    assert "[doc-0001]" in automatic.observation
+    assert not own.automatic
+    assert "[doc-0001]" in str(sent[0])  # the passages are in the first thing the model reads
+
+
+def test_tool_mode_does_not_search_by_itself():
+    agent, calls = agent_with_fake_search([tool_call("final_answer", answer="ok")], "tool")
+    response = agent.run("dosis de enoxaparina", max_steps=3, brain="base")
+    assert calls == []
+    assert [step.automatic for step in response.steps] == [False]
+
+
+def test_auto_search_needs_the_tool_in_the_registry():
+    agent = scripted_agent([tool_call("final_answer", answer="ok")])
+    agent.rag_mode = "auto"
+    with pytest.raises(ValueError, match="search_knowledge_base"):
+        agent.run("task", max_steps=3, brain="base")
+
+
+def test_unknown_rag_mode_is_rejected():
+    with pytest.raises(ValueError, match="rag_mode"):
+        ReActAgent(rag_mode="siempre")
+
+
+def test_from_env_switches_choose_the_tools():
+    full = set(ReActAgent.from_env().registry.tools)
+    assert {"final_answer", "search_knowledge_base", "dose_calculator"} <= full
+    no_rag = set(ReActAgent.from_env(rag_mode="off").registry.tools)
+    assert "search_knowledge_base" not in no_rag and "final_answer" in no_rag
+    assert set(ReActAgent.from_env(use_tools=False).registry.tools) == {
+        "final_answer", "search_knowledge_base"}
+    assert set(ReActAgent.from_env(rag_mode="off", use_tools=False).registry.tools) == {
+        "final_answer"}
