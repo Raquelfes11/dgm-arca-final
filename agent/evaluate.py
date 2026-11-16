@@ -209,7 +209,7 @@ def main() -> None:
         print(
             f"{brain:>9}: success {results[brain]['success_rate']:.2f} "
             f"· steps {results[brain]['mean_steps']:.1f} · edge cases "
-            f"{results[brain]['edge']['success_rate']:.2f} ({len(edge)})",
+            f"{results[brain]['edge']['success_rate']:.2f} ({results[brain]['edge']['n_tasks']})",
             flush=True,
         )
         # Saved after every brain, so a failure in a later one never loses what is done.
