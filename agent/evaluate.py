@@ -93,7 +93,13 @@ def _check(check: dict, answer: str) -> bool:
 
 
 def tools_used(steps: list[dict]) -> set[str]:
-    return {s["action"]["name"] for s in steps if s.get("action")}
+    """Tools the model chose to call. Steps the agent made by itself are not counted."""
+    return {s["action"]["name"] for s in steps if s.get("action") and not s.get("automatic")}
+
+
+def automatic_tools(steps: list[dict]) -> set[str]:
+    """Tools the agent ran by itself before the first step of the model (rag_mode auto)."""
+    return {s["action"]["name"] for s in steps if s.get("action") and s.get("automatic")}
 
 
 def summarise(rows: list[dict]) -> dict:
@@ -115,6 +121,20 @@ def main() -> None:
     parser.add_argument("--ids", nargs="+", default=None, help="run only these task ids")
     parser.add_argument("--max-steps", type=int, default=10)
     parser.add_argument("--out", default="reports/phase4_eval.json")
+    parser.add_argument(
+        "--rag-mode",
+        choices=["auto", "tool", "off"],
+        default="auto",
+        help="auto: the agent searches with the task text before the first step and the model "
+        "can still search (default); "
+        "tool: the model searches the knowledge base if it wants; "
+        "off: no knowledge base",
+    )
+    parser.add_argument(
+        "--no-tools",
+        action="store_true",
+        help="leave out CIMA, convert_units, dose_calculator and the sheet tool",
+    )
     args = parser.parse_args()
 
     from dotenv import load_dotenv
@@ -130,7 +150,7 @@ def main() -> None:
     ]
     if args.ids:
         tasks = [t for t in tasks if t.get("id") in set(args.ids)]
-    agent = ReActAgent.from_env()
+    agent = ReActAgent.from_env(rag_mode=args.rag_mode, use_tools=not args.no_tools)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     results = {}
@@ -142,13 +162,16 @@ def main() -> None:
                 response = response.model_dump()
                 ok = response["succeeded"] and check_answer(task, response["final_answer"])
                 used = tools_used(response["steps"])
+                by_agent = automatic_tools(response["steps"])
                 rows.append(
                     {
                         **task,
                         **response,
                         "correct": ok,
                         "tools_used": sorted(used),
-                        "required_tools_used": set(task.get("required_tools", [])) <= used,
+                        "auto_tools": sorted(by_agent),
+                        "required_tools_used": set(task.get("required_tools", []))
+                        <= used | by_agent,
                     }
                 )
                 print(
@@ -165,6 +188,11 @@ def main() -> None:
         edge = [r for r in rows if not r.get("core", True)]
         categories = sorted({r.get("category", "-") for r in rows})
         results[brain] = {
+            "config": {
+                "rag_mode": args.rag_mode,
+                "use_tools": not args.no_tools,
+                "max_steps": args.max_steps,
+            },
             **summarise(core),
             "edge": summarise(edge),
             "by_category": {

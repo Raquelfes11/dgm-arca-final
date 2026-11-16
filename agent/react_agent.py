@@ -38,6 +38,9 @@ MAX_NEW_TOKENS = 1024
 TOOL_TIMEOUT_S = 30
 SUMMARY_FALLBACK_CHARS = 1000  # used when the model gives no summary
 MAX_REPEATED_CALLS = 3  # the same call (name + arguments) this many times stops the run
+RAG_MODES = ("auto", "tool", "off")  # how the knowledge base reaches the model, see from_env
+AUTO_SEARCH_TOP_K = 5  # passages of the automatic search made before the first step
+MIN_TOP_K = 3  # small models ask for top_k=1 and the passage they need is not the first one
 
 ACTION_PATTERN = re.compile(r"Action:\s*`?(?P<name>[A-Za-z_]\w*)`?")
 ACTION_JSON_PATTERN = re.compile(r"Action:\s*(?=\{)")  # Action: {"name": ..., "arguments": {...}}
@@ -136,7 +139,7 @@ def search_knowledge_base(query: str, top_k: int = 5) -> str:
         top_k: How many passages to return.
     """
     # Call your phase-3 retriever and render hits as "[id] (source)\\ntext".
-    hits = _get_retriever().search(query, top_k)
+    hits = _get_retriever().search(query, max(top_k, MIN_TOP_K))
     if not hits:
         return "No se han encontrado pasajes relevantes."
     return "\n\n".join(f"[{h.chunk.id}] ({h.chunk.source})\n{h.chunk.text}" for h in hits)
@@ -177,12 +180,30 @@ class ReActAgent:
     token_budget: int = 6000
     steps: list[AgentStep] = field(default_factory=list)
     _models: dict = field(default_factory=dict) # brain -> (tokenizer, model)
+    rag_mode: str = "tool"  # "tool": the model decides to search, "auto": also before step 1
     _tokens_used: int = field(default=0, init=False, repr=False)  # of the run in progress
 
+    def __post_init__(self) -> None:
+        if self.rag_mode not in RAG_MODES:
+            raise ValueError(f"rag_mode must be one of {list(RAG_MODES)}, got {self.rag_mode!r}")
+
     @classmethod
-    def from_env(cls) -> ReActAgent:
-        agent = cls()
-        agent.registry.register(final_answer, search_knowledge_base)
+    def from_env(cls, rag_mode: str = "auto", use_tools: bool = True) -> ReActAgent:
+        """The agent the API and the evaluation use, with two switches for the ablations.
+
+        rag_mode "auto": the code searches with the task text before the first step, and the
+        model can still search (the default, it was the best arm in EXPERIMENTS.md, #04).
+        rag_mode "tool": the model decides whether to search the knowledge base.
+        rag_mode "off": there is no knowledge base at all.
+        use_tools False leaves out CIMA, convert_units, dose_calculator and the sheet tool.
+        final_answer is always available.
+        """
+        agent = cls(rag_mode=rag_mode)
+        if not use_tools:
+            agent.registry = ToolRegistry()
+        agent.registry.register(final_answer)
+        if rag_mode != "off":
+            agent.registry.register(search_knowledge_base)
         agent.load()
         return agent
 
@@ -320,6 +341,31 @@ class ReActAgent:
         response.tokens_used = self._tokens_used
         return response
 
+    def _auto_search(self, task: str, memory: ConversationMemory) -> None:
+        """Search the knowledge base with the task text before the first model step.
+
+        The result goes into the conversation as if the model had asked for it, so it has the
+        format the model already knows, and into self.steps marked as automatic, so the reports
+        can tell it apart from a search the model chose. It does not use up one of the max_steps.
+        """
+        if "search_knowledge_base" not in self.registry.tools:
+            raise ValueError("rag_mode='auto' needs search_knowledge_base in the registry")
+        arguments = {"query": task, "top_k": AUTO_SEARCH_TOP_K}
+        record = self._call_tool("search_knowledge_base", arguments)
+        observation = str(record.result if record.ok else record.error)
+        call = json.dumps({"name": "search_knowledge_base", "arguments": arguments},
+                          ensure_ascii=False)
+        self.steps.append(
+            AgentStep(
+                thought="Búsqueda automática en la base de conocimiento con el enunciado.",
+                action=AgentAction(name="search_knowledge_base", arguments=arguments),
+                observation=observation,
+                automatic=True,
+            )
+        )
+        memory.add("assistant", f"<tool_call>\n{call}\n</tool_call>")
+        memory.add("tool", observation, name="search_knowledge_base")
+
     def _run_loop(self, task: str, max_steps: int, brain: str) -> AgentResponse:
         """The ReAct loop.
         """
@@ -333,6 +379,8 @@ class ReActAgent:
             self.system_prompt(max_steps), count_tokens, self.token_budget, pin_first=True
         )
         memory.add("user", task)
+        if self.rag_mode == "auto":
+            self._auto_search(task, memory)
         nudged = False  # True after we already asked the model once to fix its format
         seen: dict[tuple[str, str], int] = {}  # (tool, arguments) -> times called
         for step in range(max_steps):

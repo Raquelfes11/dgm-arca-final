@@ -2556,3 +2556,125 @@ del fármaco), t20 a buscar en la base para cada fármaco (#04) y a las citas (#
 `create_preparation_sheet` de t04 en `main` a #03 y #27.
 
 ---
+
+### 2026-11-16 · Proyecto final · #04 Búsqueda automática previa en la base de conocimiento
+
+**Qué queríamos saber.** Si buscar en la base de conocimiento desde el código, antes del primer paso del
+modelo, mejora los resultados del agente, o si el modelo pequeño ya busca lo que necesita cuando la
+búsqueda es una herramienta más. En la primera evaluación y en la del #01 vimos que `thinking` a veces
+no busca nada, o busca solo un fármaco, o pide `top_k=1` y se queda con el pasaje equivocado.
+
+**Qué hicimos.** Tres cambios en la rama `fix_04_auto_search`:
+
+- **Búsqueda automática (`rag_mode="auto"`).** Antes del primer paso, el agente llama a
+  `search_knowledge_base` con el enunciado entero de la tarea (`top_k=5`) y mete la llamada y su
+  resultado en la conversación como si el modelo la hubiera pedido, con el formato que ya conoce. No
+  gasta ninguno de los `max_steps`. El paso queda en la traza marcado con `automatic=True` (campo nuevo
+  de `AgentStep`, por defecto `False`). La herramienta sigue disponible para el modelo.
+- **Interruptores.** `ReActAgent.from_env(rag_mode, use_tools)` y en `agent.evaluate` las opciones
+  `--rag-mode {tool,auto,off}` y `--no-tools` (deja solo `final_answer`: quita CIMA, `convert_units`,
+  `dose_calculator` y la hoja de preparación). El valor por defecto de `from_env` y de `agent.evaluate` es
+  `auto` (ver las decisiones más abajo); `ReActAgent()` a secas sigue en `tool`, que es el comportamiento
+  de antes. Cada informe guarda su configuración.
+- **`top_k` mínimo de 3** en `search_knowledge_base`, aunque el modelo pida menos. No se ha tocado la
+  descripción de la herramienta, así que el prompt es el mismo. Este cambio está en los tres brazos y no
+  se puede separar de ellos.
+
+En la evaluación, la búsqueda automática no cuenta como herramienta que usó el modelo
+(`tools_used`), pero sí cuenta para el éxito fiel (`required_tools_used`), porque la base se ha
+consultado. `analyze_eval` quita esos pasos de los pasos sin llamada válida y tiene dos filas nuevas.
+Tests: 8 nuevos (búsqueda automática, interruptores, `top_k` mínimo y las dos métricas de la
+evaluación).
+
+Evaluación: `thinking` (Qwen3-1.7B), las 25 tareas del banco (20 principales y 5 de borde), una
+ejecución por brazo, con el prompt de `main` (sin el ejemplo del #01):
+
+```
+uv run python -m agent.evaluate --brains thinking --rag-mode off --no-tools --out reports/fix04_solo.json
+uv run python -m agent.evaluate --brains thinking --rag-mode tool --out reports/fix04_tool.json
+uv run python -m agent.evaluate --brains thinking --rag-mode auto --out reports/fix04_auto.json
+```
+
+**Qué pasó.** Tres brazos: el modelo solo (sin base de conocimiento ni herramientas), la base como
+herramienta (el comportamiento de antes) y la base con búsqueda automática.
+
+| | solo | herramienta | automática |
+|---|---|---|---|
+| Éxito (20 principales) | 2/20 (10 %) | 5/20 (25 %) | 9/20 (45 %) |
+| Éxito fiel | 0/20 | 2/20 (10 %) | 1/20 (5 %) |
+| Llegan a `final_answer` | 18/20 | 16/20 | 19/20 |
+| Pasos sin llamada válida | 13/41 (32 %) | 15/69 (22 %) | 9/39 (23 %) |
+| Busca él mismo en la base (si la necesita) | 9/18 | 13/18 | 5/18 |
+| Respuestas con cita de un pasaje | 0/20 | 0/20 | 0/20 |
+| Casos de borde acertados (comprobador) | 1/5 | 1/5 | 1/5 |
+| Pasos medios | 2,0 | 3,5 | 1,9 |
+| Tokens medios | 2.606 | 11.305 | 8.252 |
+
+Fallos de las tareas principales, por clase (solo / herramienta / automática): no llega a responder
+2 / 4 / 1; responde sin usar las herramientas necesarias 16 / 10 / 8; usa las herramientas y el
+resultado es incorrecto 0 / 1 / 2.
+
+Por tarea. Con `auto` aciertan todas las que acertaba `tool` (t01, t04, t07, t13, t15) y cuatro más:
+t03, t14, t16 y t18. Por categoría (`solo` / `tool` / `auto`): ficha_calculo 1 / 3 / 4 de 9;
+ficha_conversion 0 / 1 / 1 de 4; cima_calculo 1 / 1 / 2 de 2; dos_fichas 0 / 0 / 2 de 3; larga 0 / 0 / 0
+de 2. Lo que sigue fallando con `auto`:
+
+- **t09** (325 mg): contesta 975 mg (que es 15 mg/kg × 65), sin cita.
+- **t17, t19, t20**: tareas con varios fármacos. El modelo solo recibe la búsqueda del enunciado entero
+  y no vuelve a buscar (en t20 no busca nada más), y da cifras sin ficha: en t20 dice "concentración no
+  especificada" para ketamina y da 4 mL de furosemida con 40 mg.
+- **t02, t05, t06, t08, t10, t11, t12**: respuestas equivocadas, casi siempre sin hacer la cuenta con
+  `dose_calculator`, por ejemplo 8.400 mL/hora en t06, o 14 horas de conservación en t12 (se esperaban
+  336).
+
+Casos de borde, leyendo las respuestas a mano (el comprobador da 1/5 en los tres brazos, que es solo
+t24):
+
+- **t21 y t22** (fuera del corpus): `solo` inventa una dosis (40 mg de omeprazol en t21) y no usa la
+  base; `tool` rechaza t21 pero inventa en t22 ("se conserva 2 años una vez abierta"); `auto` rechaza
+  las dos, con "no está especificada en la base de conocimiento". El comprobador no las da por buenas:
+  su expresión espera "no se encuentra, no hay, no dispone…" y no reconoce "no está especificada", "no
+  proporciona" ni "no se encontró" (con acento en la o). Es un fallo del comprobador, no del modelo.
+- **t25** (medicamento que no existe en CIMA): `auto` dice que zorbaxil "no está disponible en CIMA"
+  sin haber llamado a CIMA, y añade datos de otro fármaco con mg; `tool` sí consulta y lo rechaza.
+- **t23** (hoja de preparación bloqueada): con `auto` escribe "la hoja de preparación en PDF se genera
+  con los siguientes detalles" sin llamar a la herramienta; con `tool` intenta llamarla (está bloqueada) y la
+  ejecución termina sin llamada válida a `final_answer`.
+- **t14** (CIMA): con `auto` acierta (6 mL) contestando con el pasaje de la base, sin consultar CIMA
+  como pedía el enunciado.
+
+**Qué concluimos.**
+
+1. *La búsqueda automática es el cambio que más ha movido el éxito hasta ahora.* El orden solo (10 %),
+   herramienta (25 %), automática (45 %) es el que esperábamos, y `auto` no pierde ninguna tarea que
+   `tool` acertaba. Baja además el coste (de 11.305 a 8.252 tokens, de 3,5 a 1,9 pasos), porque el
+   modelo ya no tiene que buscar y reintentar. Con una ejecución determinista y 20 tareas son cuatro
+   tareas de diferencia, así que es una señal fuerte para seguir y todavía no una medición.
+2. *Casi ningún acierto es fiel.* Con `auto`, 8 de los 9 aciertos no usan `dose_calculator`: el modelo
+   lee el pasaje y hace la cuenta de cabeza (solo t18 es fiel). Con `tool` eran 3 de 5. El 1,7B calcula
+   bien las multiplicaciones sencillas, pero para ARCA la herramienta de cálculo es justo lo que debe
+   garantizar la cuenta. Hay que dar las dos cifras en el informe y cerrar la brecha (#18, y el formato).
+3. *Ninguna respuesta cita un pasaje, en ningún brazo (0/20).* El prompt lo pide y los pasajes llegan
+   con su id, pero el modelo no los cita. Con el ejemplo del #01 sí citaba. Esto apoya
+   directamente las citas forzadas desde el código (#25).
+4. *No arregla el formato ni las tareas con varios fármacos.* Los pasos sin llamada válida siguen en el
+   22-23 %, y t17, t19 y t20 fallan porque una sola búsqueda con el enunciado entero no cubre varios
+   fármacos: para eso hace falta detectar los fármacos y buscar uno a uno (#06).
+5. *Riesgo nuevo: con los pasajes delante, el modelo da por hecho cosas que no ha hecho.* Escribe que
+   CIMA no tiene un medicamento sin consultarla (t25) o que ha generado el PDF sin llamar a la
+   herramienta (t23). Son respuestas que parecen fiables y no lo son, y se tratan en #03 y #27.
+6. *El comprobador de los casos de borde castiga rechazos correctos.* Hay que ampliar la expresión (o
+   cambiar el criterio) y volver a puntuar estos informes, que guardan las respuestas, antes de dar el
+   resultado de borde por bueno.
+
+**Decisiones y siguientes pasos.** El valor por defecto pasa a `auto` en `ReActAgent.from_env` y en
+`agent.evaluate`, así que la API y los scripts de `agent/` (`check_summary`, `measure_context_size`,
+`measure_latency`) usan ahora la búsqueda automática. Es el brazo con mejor éxito y menos tokens, pero
+tiene la brecha del éxito fiel y los riesgos de los puntos 5 y 6, y con `--rag-mode tool` se vuelve al
+comportamiento anterior. A probar:
+arreglar el comprobador de los casos de borde y puntuar de nuevo; #06 (un fármaco por búsqueda) y
+volver a medir t17, t19 y t20; #25 (citas desde el código); y repetir esta comparación con
+repeticiones (#11), teniendo en cuenta que la generación es determinista y que habrá que activar el
+muestreo para que las repeticiones midan algo.
+
+---

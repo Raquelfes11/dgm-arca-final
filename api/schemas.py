@@ -133,6 +133,10 @@ class AgentStep(BaseModel):
     thought: str
     action: AgentAction | None = None
     observation: str | None = None
+    automatic: bool = Field(
+        default=False,
+        description="True if the agent made this step itself (the automatic search), not the model",
+    )
 
 
 class AgentResponse(BaseModel):

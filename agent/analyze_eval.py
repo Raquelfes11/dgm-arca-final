@@ -54,7 +54,7 @@ def analyse_brain(rows: list[dict]) -> dict:
     """Metrics of one brain from its result rows (core and edge tasks together)."""
     core = [r for r in rows if r.get("core", True)]
     edge = [r for r in rows if not r.get("core", True)]
-    steps = [s for r in core for s in r["steps"]]
+    steps = [s for r in core for s in r["steps"] if not s.get("automatic")]
     needs_kb = [r for r in core if "search_knowledge_base" in r.get("required_tools", [])]
     failures = {name: 0 for name in FAILURE_CLASSES}
     for row in core:
@@ -74,6 +74,7 @@ def analyse_brain(rows: list[dict]) -> dict:
             1 for r in core if r["succeeded"] and not str(r.get("final_answer", "")).strip()
         ),
         "kb_used": sum("search_knowledge_base" in r.get("tools_used", []) for r in needs_kb),
+        "auto_search": sum(any(s.get("automatic") for s in r["steps"]) for r in core),
         "kb_needed": len(needs_kb),
         "mean_steps": sum(r["n_steps"] for r in core) / len(core) if core else 0.0,
         "mean_tokens": sum(r["tokens_used"] for r in core) / len(core) if core else 0.0,
@@ -125,8 +126,9 @@ def render(analysis: dict, grid: bool = True) -> str:
         ("Casos de borde acertados", lambda m: _pct(m["edge_correct"], m["n_edge"])),
         ("Pasos sin llamada válida", lambda m: _pct(m["invalid_steps"], m["n_steps"])),
         ("Respuestas vacías", lambda m: _pct(m["empty_answers"], m["n_core"])),
-        ("Usa la base de conocimiento (si la necesita)",
+        ("Busca él mismo en la base de conocimiento (si la necesita)",
          lambda m: _pct(m["kb_used"], m["kb_needed"])),
+        ("Con búsqueda automática previa", lambda m: _pct(m["auto_search"], m["n_core"])),
         ("Pasos medios", lambda m: f"{m['mean_steps']:.1f}"),
         ("Tokens medios", lambda m: f"{m['mean_tokens']:.0f}"),
     ]
