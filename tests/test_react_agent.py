@@ -10,7 +10,12 @@ import json
 import pytest
 
 from agent.memory import ConversationMemory
-from agent.react_agent import MAX_REPEATED_CALLS, ReActAgent, _resolve_adapter
+from agent.react_agent import (
+    MAX_REPEATED_CALLS,
+    ReActAgent,
+    _action_line_fallback,
+    _resolve_adapter,
+)
 from tool_use.tools import SHEETS_DIR
 
 
@@ -185,3 +190,89 @@ def test_run_creates_its_memory_with_the_task_pinned(monkeypatch):
     agent = scripted_agent([tool_call("final_answer", answer="ok")])
     agent.run("task", max_steps=2, brain="base")
     assert seen == [True]  # the default of the class is False: the agent must turn it on
+
+
+KNOWN = {"dose_calculator": None, "search_knowledge_base": None, "final_answer": None}
+
+
+def test_action_line_with_only_the_tool_name():
+    call = _action_line_fallback("Thought: busco.\nAction: search_knowledge_base", KNOWN)
+    assert call.name == "search_knowledge_base" and call.arguments == {}
+
+
+def test_action_line_with_the_arguments_after_the_name():
+    call = _action_line_fallback('Action: dose_calculator {"expression": "10 * 20"}', KNOWN)
+    assert call.name == "dose_calculator" and call.arguments == {"expression": "10 * 20"}
+
+
+def test_action_line_with_a_whole_json_call():
+    # the shape Qwen3-1.7B wrote in the phase-4 evaluation (t09, t20)
+    raw = (
+        "Voy a calcular.\n\n"
+        'Action: {"name": "dose_calculator", "arguments": {"expression": "10 * 20", "decimals": 1}}'
+    )
+    call = _action_line_fallback(raw, KNOWN)
+    assert call.name == "dose_calculator"
+    assert call.arguments == {"expression": "10 * 20", "decimals": 1}
+
+
+def test_action_line_json_call_accepts_parameters_instead_of_arguments():
+    raw = 'Action: {"name": "dose_calculator", "parameters": {"expression": "2 * 3"}}'
+    call = _action_line_fallback(raw, KNOWN)
+    assert call.arguments == {"expression": "2 * 3"}
+
+
+def test_action_line_json_call_without_arguments_has_empty_arguments():
+    call = _action_line_fallback('Action: {"name": "search_knowledge_base"}', KNOWN)
+    assert call.name == "search_knowledge_base" and call.arguments == {}
+
+
+def test_action_line_ignores_tools_that_do_not_exist():
+    assert _action_line_fallback("Action: borrar_todo", KNOWN) is None
+    assert _action_line_fallback('Action: {"name": "borrar_todo", "arguments": {}}', KNOWN) is None
+    assert _action_line_fallback('Action: {"name": ["dose_calculator"]}', KNOWN) is None
+
+
+def test_action_line_ignores_broken_json_and_other_json():
+    broken = 'Action: {"name": "dose_calculator", "arguments": {'
+    assert _action_line_fallback(broken, KNOWN) is None
+    assert _action_line_fallback('Action: ["dose_calculator"]', KNOWN) is None
+    assert _action_line_fallback("Action:", KNOWN) is None
+
+
+def test_action_line_ignores_text_inside_think():
+    closed = '<think>Action: {"name": "dose_calculator", "arguments": {}}</think>Hola'
+    unclosed = 'Hola <think>Action: {"name": "dose_calculator", "arguments": {}}'
+    assert _action_line_fallback(closed, KNOWN) is None
+    assert _action_line_fallback(unclosed, KNOWN) is None
+
+
+def test_action_line_takes_the_last_one_whatever_its_shape():
+    raw = (
+        "Action: dose_calculator\nmejor no.\n"
+        'Action: {"name": "final_answer", "arguments": {"answer": "7"}}'
+    )
+    assert _action_line_fallback(raw, KNOWN).name == "final_answer"
+    raw = 'Action: {"name": "final_answer", "arguments": {"answer": "7"}}\nAction: dose_calculator'
+    assert _action_line_fallback(raw, KNOWN).name == "dose_calculator"
+
+
+def test_loop_runs_a_call_written_as_action_json():
+    step = (
+        "Thought: calculo.\n"
+        'Action: {"name": "dose_calculator", "arguments": {"expression": "1 + 1", "decimals": 2}}'
+    )
+    agent = scripted_agent([step, tool_call("final_answer", answer="2")])
+    response = agent.run("task", max_steps=4, brain="base")
+    assert response.succeeded and response.final_answer == "2"
+    assert response.steps[0].action.name == "dose_calculator"  # it ran, with no nudge first
+    assert "2" in response.steps[0].observation
+
+
+def test_system_prompt_is_formatted():
+    prompt = ReActAgent().system_prompt(7)
+    assert "at most 7 steps" in prompt
+    for leftover in ("{{", "{max_steps}", "{tools_description}"):
+        assert leftover not in prompt
+    assert '"name": "final_answer"' in prompt  # the braces of the JSON survived format()
+    assert "dose_calculator" in prompt  # the tool descriptions were injected

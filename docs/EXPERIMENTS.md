@@ -2427,3 +2427,132 @@ incorrecta. Falta probar un ejemplo completo en el prompt (buscar en la base de 
 `final_answer`) y medir si los modelos empiezan a usar las herramientas.
 
 ---
+
+### 2026-11-16 · Proyecto final · #01 Formato de las llamadas: `Action:` con JSON
+
+**Qué queríamos saber.** Si leer también `Action: {"name": ..., "arguments": {...}}` (el JSON entero
+detrás de `Action:`, que es lo que escribe `thinking` en t09 y t20 y que el fallback de la entrada del
+11-11 no leía, porque solo aceptaba `Action: nombre`) reduce los pasos sin llamada válida. Y, ya que
+medíamos, tres preguntas más: qué aporta un ejemplo completo en el prompt, si un modelo base más grande
+(Qwen3-4B) arregla lo que queda, y si lo que queda es de formato o es otra cosa.
+
+**Qué hicimos.** Lo que entra en la rama `fix_01_parser_action` (y en su PR) es solo el parser y sus tests:
+
+- **Parser.** `_action_line_fallback` en `agent/react_agent.py` acepta ahora dos formas: `Action:
+  nombre` (con argumentos opcionales en un JSON detrás) y `Action: {"name": ..., "arguments": {...}}`
+  (también con `parameters`). Siguen valiendo solo los nombres que estén en el registro, solo el texto
+  fuera de `<think>` y, si hay varias, la última. Como en la entrada del 11-11, lo consideramos una
+  concesión a los modelos pequeños y no un formato que queramos fomentar.
+- **Tests.** 11 tests nuevos en `tests/test_react_agent.py`: las dos formas, `parameters`, herramientas
+  que no existen, JSON roto, texto dentro de `<think>`, la última `Action` gana, una ejecución completa
+  con `Action: {json}` y que el prompt se formatea bien. `uv run pytest` dio 303 en verde con la
+  versión que llevaba el ejemplo; al quitarlo solo cambia el test del prompt, y se repite antes del PR.
+  `tests/test_api.py` necesita `ARCA_RLM_BASE_MODEL` en el entorno porque carga el modelo de verdad.
+- **El prompt queda idéntico al de `main`.** Probamos también un ejemplo completo en el prompt (buscar en
+  la base de conocimiento, calcular con `dose_calculator` y cerrar con `final_answer`, con un fármaco
+  inventado) y quitamos la frase de Teresa "Do not write "Action: tool_name" on its own: it is not
+  executed". Eso vive en la rama `exp_01b_prompt_example`, para medirlo aparte con repeticiones, y no
+  entra en este PR.
+
+Evaluación: `thinking` (Qwen3-1.7B salvo donde se dice), una ejecución, solo t04, t09 y t20, que son las
+que tenían `Action:` con JSON o fallos de formato en la primera evaluación. Cinco ejecuciones:
+
+| Informe | Código | Modelo |
+|---|---|---|
+| `reports/phase4_eval.json` | ARCA original | Qwen3-1.7B |
+| `reports/fix01_control_main.json` | `main` (arreglo del 11-11) | Qwen3-1.7B |
+| `reports/fix01_parser_only.json` | #01: solo parser, prompt de `main` | Qwen3-1.7B |
+| `reports/fix01_check.json` | #01: parser + ejemplo (`exp_01b_prompt_example`) | Qwen3-1.7B |
+| `reports/fix01_check_qwen3-4b.json` | #01: parser + ejemplo | Qwen3-4B |
+
+```
+uv run python -m agent.evaluate --brains thinking --ids t04 t09 t20 --out reports/fix01_parser_only.json
+uv run python -m agent.analyze_eval --report reports/fix01_parser_only.json --no-grid
+export ARCA_THINKING_MODEL=Qwen/Qwen3-4B   # solo para la del 4B
+```
+
+**Qué pasó.** Mismo cerebro (Qwen3-1.7B) y mismas tres tareas en las cuatro primeras columnas; solo
+cambia el código.
+
+| | ARCA original | `main` | #01 solo parser | #01 parser + ejemplo |
+|---|---|---|---|---|
+| Éxito | 1/3 | 1/3 | 1/3 | 1/3 |
+| Éxito fiel | 0/3 | 1/3 | 1/3 | 1/3 |
+| Llegan a `final_answer` | 1/3 | 2/3 | 3/3 | 3/3 |
+| Pasos sin llamada válida | 5/7 | 2/8 | 3/11 | 0/11 |
+| Pasos medios | 2,3 | 2,7 | 3,7 | 3,7 |
+| Tokens medios | 6.577 | 9.515 | 12.643 | 13.949 |
+
+Mismo código (parser + ejemplo) y distinto modelo:
+
+| | Qwen3-1.7B | Qwen3-4B |
+|---|---|---|
+| Éxito | 1/3 | 2/3 |
+| Éxito fiel | 1/3 | 1/3 |
+| Llegan a `final_answer` | 3/3 | 3/3 |
+| Pasos sin llamada válida | 0/11 | 0/10 |
+| Pasos medios | 3,7 | 3,3 |
+| Tokens medios | 13.949 | 12.865 |
+
+Por tarea:
+
+- **t04** (0,8 mL): acierta el 1,7B con las cuatro versiones y el 4B. Con solo parser pierde un paso
+  escribiendo "Final Answer:" dentro de un `<think>` sin llamada, calcula `80 * 0.01` (da 0,8, pero no es
+  la cuenta de la ficha) y responde sin ninguna cita. El 4B busca, calcula `80 / 100` y cita
+  `[cc1d1324d0-0012]`, que es el pasaje correcto.
+- **t09** (325 mg): el 1,7B falla en las tres versiones, cada una a su manera: `main` dice que la base
+  no tiene el dato, con ejemplo contesta 195 mg y con solo parser contesta 780 mg ("12 mg/kg/día", una
+  cifra que no sale de ninguna parte). Con solo parser el pasaje "más de 5 mg/kg/día" (`-0062`) llegó el
+  primero de los cinco y el modelo lo ignoró. El 4B lo recupera en tercer lugar, lo lee y contesta 325
+  mg con la cita buena, pero sin llamar a `dose_calculator`, así que cuenta como éxito pero no como fiel.
+  Ojo con lo que dijimos antes: que el pasaje no llegara al top-5 era con el texto de la tarea
+  (`validate_bench --retrieval`); con las consultas cortas que escribe el modelo, con el nombre del
+  fármaco, sí llega. No es solo el retriever.
+- **t20** (3,2 / 4 / 0,8 / 16 mL): falla en todas. Con solo parser el 1,7B no consulta la base de
+  conocimiento ni una vez, usa solo CIMA (la concentración de ketamina de 50 mg/mL sí es la buena) e
+  inventa el resto: da 8 / 4 / 0,8 / 10 mL, y 4 y 0,8 coinciden con lo esperado por casualidad, sin haber
+  buscado esos fármacos. Pierde dos pasos: uno donde la generación se corta a mitad del razonamiento y
+  otro con un JSON de la llamada sin cerrar ("Unterminated string"). El 4B mejora algo (busca ketamina,
+  enoxaparina y aciclovir) pero pide siempre `top_k=1`: para ketamina le llega el pasaje de la vía
+  intramuscular (10 mg/kg) y lo usa para la vía intravenosa (16 mL en vez de 3,2), no busca furosemida
+  (1-2 mg/kg inventado: 16 mL), para aciclovir le llega el pasaje de indicaciones y se inventa 200 mg y
+  500 mg/mL (la ficha dice 25 mg/mL: da 0,4 mL en vez de 16), cita el id de ketamina para furosemida y no
+  usa `dose_calculator` ni una vez. Solo acierta enoxaparina (0,8 mL).
+
+**Qué concluimos.**
+
+1. *El parser funciona, pero en estas tres tareas no mueve el éxito.* Los tests lo cubren y en t20 una
+   llamada que antes se descartaba ahora se ejecuta, pero el éxito del 1,7B es 1/3 en las cuatro
+   versiones. Con solo parser los pasos sin llamada válida son 3/11 (27 %), casi igual que en `main`
+   (2/8, 25 %); lo que queda ya no es el `Action:` con JSON sino salidas que no llevan llamada o que se
+   cortan. Todos llegan a `final_answer` gracias al aviso del agente tras el primer fallo, pero cada
+   fallo cuesta un paso. Además, el informe no guarda el texto crudo del modelo, así que no podemos
+   contar cuántas llamadas se han ejecutado por el fallback: habría que anotar en la traza por qué ruta
+   se leyó cada llamada (encaja con #12).
+2. *El ejemplo es lo único que baja los pasos inválidos (3/11 a 0/11), pero con una ejecución es una
+   señal, no una medición.* En tokens no hay efecto claro: las diferencias salen sobre todo de la
+   longitud de t20 (6.017, 17.591 y 24.895 tokens en `main`, solo parser y con ejemplo). Y la sospecha
+   que teníamos, que el ejemplo empuja a contestar con cifras inventadas, no se sostiene con esto: sin
+   ejemplo el 1,7B también inventa en t09 (780 mg) y en t20. Seguimos sin saber si ayuda; hace falta
+   medirlo con repeticiones (#11) antes de decidir si entra en el prompt.
+3. *Un modelo más grande ayuda a leer, no a seguir el procedimiento.* El 4B acierta t09 (2/3 frente a
+   1/3) porque lee el pasaje que el 1,7B ignora, y no gasta ningún paso en formato. Pero en t20 repite
+   los mismos errores: no busca todos los fármacos, inventa concentraciones, cita ids ajenos y no usa
+   `dose_calculator`. Con n = 3 y una ejecución, la diferencia de 2/3 a 1/3 es una tarea y no basta
+   para decidir el cambio de base (#33); sí sugiere que los cambios de proceso (#04, #18, #25, #26) hacen
+   falta con cualquier tamaño. Se ve también un ajuste barato: la herramienta de búsqueda podría
+   imponer un `top_k` mínimo de 3, porque el modelo pide 1 y se queda con el pasaje equivocado.
+4. *Lo que queda en t04, t09 y t20 no es de formato.* t09 depende de que el modelo lea lo que recupera,
+   t20 de que busque cada fármaco y no se invente concentraciones, y las citas con ids de otro fármaco
+   siguen apareciendo (#25).
+
+**Decisiones y cosas a probar.** El PR lleva solo el parser y los tests, con el prompt de `main` intacto.
+Queda una incoherencia que tiene que decidir el equipo: la frase de Teresa en el prompt y el aviso del
+agente tras un fallo ("Do not write 'Action: name'") dicen que `Action: nombre` no se ejecuta, y con el
+fallback sí se ejecuta. Hay que elegir entre dejarlo como disuasión explícita o cambiar los textos. A
+probar: repetir con y sin ejemplo sobre el banco completo y con repeticiones (#11), guardar en la traza
+la ruta de lectura de cada llamada, y con el resto de la lista: t09 a #05 y #06 (consulta con el nombre
+del fármaco), t20 a buscar en la base para cada fármaco (#04) y a las citas (#25), y el intento de
+`create_preparation_sheet` de t04 en `main` a #03 y #27.
+
+---
