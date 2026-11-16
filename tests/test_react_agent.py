@@ -396,6 +396,8 @@ def test_unknown_rag_mode_is_rejected():
 
 
 def test_from_env_switches_choose_the_tools():
+    assert ReActAgent.from_env().rag_mode == "auto"  # the default of the API and the evaluation
+    assert ReActAgent().rag_mode == "tool"  # a bare agent keeps the old behaviour
     full = set(ReActAgent.from_env().registry.tools)
     assert {"final_answer", "search_knowledge_base", "dose_calculator"} <= full
     no_rag = set(ReActAgent.from_env(rag_mode="off").registry.tools)

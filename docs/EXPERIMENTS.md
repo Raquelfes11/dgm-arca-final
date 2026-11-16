@@ -2573,7 +2573,8 @@ no busca nada, o busca solo un fármaco, o pide `top_k=1` y se queda con el pasa
   de `AgentStep`, por defecto `False`). La herramienta sigue disponible para el modelo.
 - **Interruptores.** `ReActAgent.from_env(rag_mode, use_tools)` y en `agent.evaluate` las opciones
   `--rag-mode {tool,auto,off}` y `--no-tools` (deja solo `final_answer`: quita CIMA, `convert_units`,
-  `dose_calculator` y la hoja de preparación). El valor por defecto es `tool`, que es el comportamiento
+  `dose_calculator` y la hoja de preparación). El valor por defecto de `from_env` y de `agent.evaluate` es
+  `auto` (ver las decisiones más abajo); `ReActAgent()` a secas sigue en `tool`, que es el comportamiento
   de antes. Cada informe guarda su configuración.
 - **`top_k` mínimo de 3** en `search_knowledge_base`, aunque el modelo pida menos. No se ha tocado la
   descripción de la herramienta, así que el prompt es el mismo. Este cambio está en los tres brazos y no
@@ -2666,9 +2667,11 @@ t24):
    cambiar el criterio) y volver a puntuar estos informes, que guardan las respuestas, antes de dar el
    resultado de borde por bueno.
 
-**Decisiones y siguientes pasos.** El PR deja `rag_mode="tool"` como valor por defecto, así que la API
-no cambia de comportamiento. Si el equipo está de acuerdo, cambiar el valor por defecto a `auto` es una
-línea y habría que hacerlo aparte, una vez decidido cómo tratamos la brecha del éxito fiel. A probar:
+**Decisiones y siguientes pasos.** El valor por defecto pasa a `auto` en `ReActAgent.from_env` y en
+`agent.evaluate`, así que la API y los scripts de `agent/` (`check_summary`, `measure_context_size`,
+`measure_latency`) usan ahora la búsqueda automática. Es el brazo con mejor éxito y menos tokens, pero
+tiene la brecha del éxito fiel y los riesgos de los puntos 5 y 6, y con `--rag-mode tool` se vuelve al
+comportamiento anterior. A probar:
 arreglar el comprobador de los casos de borde y puntuar de nuevo; #06 (un fármaco por búsqueda) y
 volver a medir t17, t19 y t20; #25 (citas desde el código); y repetir esta comparación con
 repeticiones (#11), teniendo en cuenta que la generación es determinista y que habrá que activar el

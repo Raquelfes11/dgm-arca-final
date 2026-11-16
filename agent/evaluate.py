@@ -124,9 +124,10 @@ def main() -> None:
     parser.add_argument(
         "--rag-mode",
         choices=["auto", "tool", "off"],
-        default="tool",
-        help="tool: the model searches the knowledge base if it wants (default); "
-        "auto: the agent also searches with the task text before the first step; "
+        default="auto",
+        help="auto: the agent searches with the task text before the first step and the model "
+        "can still search (default); "
+        "tool: the model searches the knowledge base if it wants; "
         "off: no knowledge base",
     )
     parser.add_argument(

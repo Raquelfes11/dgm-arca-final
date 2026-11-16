@@ -188,11 +188,12 @@ class ReActAgent:
             raise ValueError(f"rag_mode must be one of {list(RAG_MODES)}, got {self.rag_mode!r}")
 
     @classmethod
-    def from_env(cls, rag_mode: str = "tool", use_tools: bool = True) -> ReActAgent:
+    def from_env(cls, rag_mode: str = "auto", use_tools: bool = True) -> ReActAgent:
         """The agent the API and the evaluation use, with two switches for the ablations.
 
-        rag_mode "tool": the model decides whether to search the knowledge base (the default).
-        rag_mode "auto": the code also searches with the task text before the first step.
+        rag_mode "auto": the code searches with the task text before the first step, and the
+        model can still search (the default, it was the best arm in EXPERIMENTS.md, #04).
+        rag_mode "tool": the model decides whether to search the knowledge base.
         rag_mode "off": there is no knowledge base at all.
         use_tools False leaves out CIMA, convert_units, dose_calculator and the sheet tool.
         final_answer is always available.
