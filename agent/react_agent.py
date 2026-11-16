@@ -40,32 +40,56 @@ SUMMARY_FALLBACK_CHARS = 1000  # used when the model gives no summary
 MAX_REPEATED_CALLS = 3  # the same call (name + arguments) this many times stops the run
 
 ACTION_PATTERN = re.compile(r"Action:\s*`?(?P<name>[A-Za-z_]\w*)`?")
+ACTION_JSON_PATTERN = re.compile(r"Action:\s*(?=\{)")  # Action: {"name": ..., "arguments": {...}}
 
 _retriever = None
 
+
+def _json_object_at(text: str) -> dict | None:
+    """The JSON object that starts at the beginning of text, or None if there is none."""
+    if not text.startswith("{"):
+        return None
+    try:
+        payload, _ = json.JSONDecoder().raw_decode(text)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 def _action_line_fallback(raw: str, known_tools) -> ToolCall | None:
-    """Read ``Action: tool_name`` (optionally followed by a JSON object) written without a
-    ``<tool_call>`` block. Small models do this a lot (phase 4: ~half of the steps without a
-    valid call). Only names that exist in the registry count, and only text outside ``<think>``.
+    """Read an Action line written without a <tool_call> block. Small models do this a lot
+    (phase 4: about half of the steps without a valid call). Two shapes are accepted:
+    Action: tool_name, optionally followed by the arguments as a JSON object, and
+    Action: {"name": "tool_name", "arguments": {...}}, which is what Qwen3-1.7B wrote in
+    t04, t09 and t20. Only names that exist in the registry count, and only text outside
+    the think block.
     """
     visible = THINK_PATTERN.sub("", raw)
     visible = visible.rsplit("<think>", 1)[0] if "<think>" in visible else visible
-    matches = [m for m in ACTION_PATTERN.finditer(visible) if m.group("name") in known_tools]
-    if not matches:
-        return None
-    match = matches[-1]  # the last Action: is the decision the model ended up with
-    arguments: dict = {}
-    rest = visible[match.end():].lstrip()
-    if rest.startswith("{"):
-        try:
-            payload, _ = json.JSONDecoder().raw_decode(rest)
-        except json.JSONDecodeError:
-            payload = None
-        if isinstance(payload, dict):
+    found: list[tuple[int, ToolCall]] = []  # (position in the text, call)
+    for match in ACTION_PATTERN.finditer(visible):
+        if match.group("name") not in known_tools:
+            continue
+        payload = _json_object_at(visible[match.end():].lstrip())
+        arguments: dict = {}
+        if payload is not None:
             arguments = payload.get("arguments", payload) if "name" in payload else payload
             if not isinstance(arguments, dict):
                 arguments = {}
-    return ToolCall(name=match.group("name"), arguments=arguments)
+        found.append((match.start(), ToolCall(name=match.group("name"), arguments=arguments)))
+    for match in ACTION_JSON_PATTERN.finditer(visible):
+        payload = _json_object_at(visible[match.end():])
+        name = payload.get("name") if payload is not None else None
+        if not isinstance(name, str) or name not in known_tools:
+            continue
+        arguments = payload.get("arguments", payload.get("parameters", {}))
+        if not isinstance(arguments, dict):
+            arguments = {}
+        found.append((match.start(), ToolCall(name=name, arguments=arguments)))
+    if not found:
+        return None
+    return max(found, key=lambda item: item[0])[1]  # the last Action is the final decision
+
 
 def _get_retriever():
     """Ingest -> chunk -> build_retrievers, one single time. Returns the chosen retriever."""

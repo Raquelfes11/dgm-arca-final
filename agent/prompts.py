@@ -19,8 +19,7 @@ Solve the task by repeating the following loop until you can answer:
 (3) Observation: you will receive the tool result. Use it in your next Thought.
 
 Rules:
-- The only valid way to act is the <tool_call> block above. Do not write "Action: tool_name"
-  on its own: it is not executed. To finish, write
+- Always act with the <tool_call> block above, with the JSON inside it. To finish, write
   <tool_call>
   {{"name": "final_answer", "arguments": {{"answer": "your complete answer"}}}}
   </tool_call>
@@ -37,6 +36,22 @@ Rules:
   brackets. If the passages do not answer the question, say so in `final_answer` instead of
   answering from your own knowledge.
 - You have at most {max_steps} steps.
+
+Example of a whole run. The drug and the numbers are made up, do not reuse them:
+Thought: necesito la dosis por kilo de peso y después calcular con el peso del paciente.
+<tool_call>
+{{"name": "search_knowledge_base", "arguments": {{"query": "dosis de farmacoejemplo por kilo"}}}}
+</tool_call>
+Observation: [ejemplo-1] (farmacoejemplo.txt) La dosis es de 10 mg/kg cada 8 horas.
+Thought: son 10 mg/kg y el paciente pesa 20 kg, así que calculo 10 * 20.
+<tool_call>
+{{"name": "dose_calculator", "arguments": {{"expression": "10 * 20"}}}}
+</tool_call>
+Observation: 200.0
+Thought: ya tengo el resultado y puedo responder.
+<tool_call>
+{{"name": "final_answer", "arguments": {{"answer": "200 mg por toma [ejemplo-1]."}}}}
+</tool_call>
 
 Available tools:
 {tools_description}
