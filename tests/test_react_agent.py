@@ -276,3 +276,43 @@ def test_system_prompt_is_formatted():
         assert leftover not in prompt
     assert '"name": "final_answer"' in prompt  # the braces of the JSON survived format()
     assert "dose_calculator" in prompt  # the tool descriptions were injected
+
+
+EMPTY_CALLS = [
+    tool_call("final_answer", answer=""),
+    tool_call("final_answer", answer="   "),
+    tool_call("final_answer"),  # without the answer argument
+]
+
+
+@pytest.mark.parametrize("empty", EMPTY_CALLS)
+def test_empty_final_answer_gets_one_more_try(empty):
+    agent = scripted_agent([empty, tool_call("final_answer", answer="0,8 mL")])
+    response = agent.run("task", max_steps=5, brain="base")
+    assert response.succeeded and response.final_answer == "0,8 mL"
+    assert "without an answer" in response.steps[0].observation
+    assert response.n_steps == 2
+
+
+def test_two_empty_final_answers_in_a_row_fail_the_run():
+    empty = tool_call("final_answer", answer="")
+    agent = scripted_agent([empty, empty])
+    response = agent.run("task", max_steps=5, brain="base")
+    assert not response.succeeded and response.final_answer == ""
+    assert response.n_steps == 2
+    assert response.steps[-1].observation == "(no tool call)"
+
+
+def test_a_valid_call_resets_the_empty_final_answer_counter():
+    empty = tool_call("final_answer", answer="")
+    agent = scripted_agent([empty, CALC, empty, tool_call("final_answer", answer="ok")])
+    response = agent.run("task", max_steps=6, brain="base")
+    assert response.succeeded and response.final_answer == "ok"
+    assert response.n_steps == 4
+
+
+def test_null_answer_counts_as_empty():
+    agent = scripted_agent([tool_call("final_answer", answer=None),
+                            tool_call("final_answer", answer="ok")])
+    response = agent.run("task", max_steps=5, brain="base")
+    assert response.succeeded and response.final_answer == "ok"

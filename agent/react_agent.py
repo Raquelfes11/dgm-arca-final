@@ -56,6 +56,12 @@ def _json_object_at(text: str) -> dict | None:
     return payload if isinstance(payload, dict) else None
 
 
+def _answer_text(arguments: dict) -> str:
+    """The answer of a final_answer call as text. Missing or null is an empty string."""
+    answer = arguments.get("answer")
+    return "" if answer is None else str(answer)
+
+
 def _action_line_fallback(raw: str, known_tools) -> ToolCall | None:
     """Read an Action line written without a <tool_call> block. Small models do this a lot
     (phase 4: about half of the steps without a valid call). Two shapes are accepted:
@@ -342,7 +348,7 @@ class ReActAgent:
             problem = None  # why this step cannot be run, if it cannot
             if parsed.has_tool_calls:
                 first = next(c for c in parsed.tool_calls if c.error is None)
-                if first.name == "final_answer" and not str(first.arguments.get("answer", "")).strip():
+                if first.name == "final_answer" and not _answer_text(first.arguments).strip():
                     problem = (
                         "final_answer was called without an answer. Call it again with the "
                         'complete answer: <tool_call>{"name": "final_answer", "arguments": '
@@ -377,7 +383,7 @@ class ReActAgent:
             if call.name == "final_answer":
                 self.steps.append(AgentStep(thought=thought, action=action))
                 return AgentResponse(
-                    final_answer=str(call.arguments.get("answer", "")), 
+                    final_answer=_answer_text(call.arguments),
                     steps=self.steps, 
                     n_steps=step + 1,
                 )
