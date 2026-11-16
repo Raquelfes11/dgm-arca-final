@@ -352,12 +352,14 @@ def main():
             "fecha_descarga": date.today().isoformat(),
         })
 
-    if filas and not args.limit:
+    if filas and not args.limit and not args.from_manifest:
         with MANIFEST.open("w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=list(filas[0].keys()))
             w.writeheader()
             w.writerows(filas)
         print(f"\nManifiesto escrito en {MANIFEST}")
+    elif args.from_manifest:
+        print(f"\nManifiesto {MANIFEST.name} no modificado (modo --from-manifest)")
 
     print(f"\nDescargados: {len(filas)} / {len(trabajo)}")
     if fallos:
