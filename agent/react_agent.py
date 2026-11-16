@@ -117,6 +117,10 @@ def _get_retriever():
             weight_bm25=LAMBDA_BM25
         )
         _retriever = retrievers[RETRIEVER]
+        if os.environ.get("ARCA_DRUG_FILTER", "1").lower() not in ("0", "false", "off"):
+            from rag.drugs import DrugAwareRetriever
+
+            _retriever = DrugAwareRetriever(_retriever, chunks)  # ARCA_DRUG_FILTER=0 turns it off
 
     return _retriever
 

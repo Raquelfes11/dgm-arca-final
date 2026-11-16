@@ -2855,3 +2855,92 @@ Sin embargo, hay 3 casos menos que no llegan a generar una llamada a `final_answ
 Por lo tanto, el modelo mejora si mantemos este cambio.
 
 ---
+
+### 2026-11-16 · Proyecto final · #06 Buscar solo en las fichas de los fármacos de la pregunta
+
+**Qué queríamos saber.** Con la búsqueda automática del #04, una sola búsqueda con el enunciado entero
+no cubría las tareas con varios fármacos (t17, t19, t20) y a veces traía pasajes de otro fármaco con un
+nombre parecido. Queríamos saber si, cuando la pregunta nombra fármacos, buscar solo dentro de sus fichas
+(y repartir los pasajes entre ellos) hace que lleguen al modelo los pasajes que necesita, y si eso se
+nota en el éxito y en el éxito fiel (el que usa `dose_calculator`).
+
+**Qué hicimos.** Cambios en la rama `feat_06_drug_filter`:
+
+- **`rag/drugs.py` (nuevo).** La lista de fármacos sale de los nombres de los ficheros del corpus (sin el
+  id numérico), más un diccionario de alias de lo que escribe un estudiante (adrenalina → epinefrina,
+  paracetamol → acetaminofeno, metamizol → dipirona, etc.). `detect_drugs` busca los nombres como palabras
+  enteras y los devuelve en el orden de la pregunta. `DrugAwareRetriever` envuelve al retriever: sin
+  fármacos en la pregunta hace la búsqueda normal, y con fármacos filtra el ranking por fichero y se queda
+  con `max(2, ceil(top_k / n_fármacos))` pasajes de cada uno, en el orden en que se nombran.
+- **`agent/react_agent.py`.** `_get_retriever` envuelve el retriever con el filtro. Se apaga con
+  `ARCA_DRUG_FILTER=0`, para poder medir con y sin él.
+- **`agent/evaluate.py`.** El #04b dejó una variable sin definir (`edge`) al final de `main()`: una
+  ejecución completa de 25 tareas terminaba con `NameError` sin escribir el informe. Ahora se escribe el
+  informe antes de imprimir el resumen y el resumen usa `n_tasks`.
+- **Tests.** 7 en `tests/test_drugs.py` (nombres, alias, palabras enteras, reparto de pasajes, uno y varios
+  fármacos, sin fármaco) y 1 de extremo a extremo de `evaluate.main()` con un agente falso, que habría
+  cazado el error de arriba. La suite queda en 328.
+
+Medimos la recuperación con `agent.validate_bench --retrieval` (pasajes con la evidencia dentro del top 5,
+con la pregunta como consulta) y el agente con `thinking` en `auto`, 3 ejecuciones con filtro
+(`fix06_auto`, `_b`, `_c`) y 3 sin él (`fix04_auto` puntuado de nuevo con `agent.rescore`, y `fix06_nofilter_b`
+y `_c`, con `ARCA_DRUG_FILTER=0`). En modo `tool`, una ejecución con filtro (`fix06_tool`) y la de antes sin él.
+
+**Qué pasó.**
+
+| | Sin filtro | Con filtro |
+|---|---|---|
+| Tareas principales con toda la evidencia en el top 5 | 7/20 | 10/20 |
+| Pasajes con evidencia | 13/33 | 20/33 |
+| Éxito `auto` (de 20) | 9, 10, 8 (media 9,0) | 12, 10, 10 (media 10,7) |
+| Éxito fiel `auto` (de 20) | 1, 2, 2 (media 1,7) | 5, 5, 3 (media 4,3) |
+| Casos de borde `auto` (de 5) | 3, 3, 2 | 3, 2, 3 |
+| Pasos sin llamada válida por ejecución | 9, 12, 10 | 8, 8, 10 |
+| Éxito `tool` (una ejecución) | 5/20 (fiel 2) | 5/20 (fiel 0) |
+
+La recuperación es determinista, así que esas dos filas no tienen ruido. El éxito sube 1,7 tareas de
+media con rangos que se tocan (10-12 frente a 8-10), dentro del ruido entre instancias que ya habíamos
+visto (alrededor de ±3 tareas de 20). El éxito fiel es la señal más limpia: los rangos no se solapan
+(3-5 frente a 1-2). Por tarea, de las tres ejecuciones de cada brazo:
+
+- **Ganan con filtro:** t02 (2/3 frente a 0/3), t05 (3 frente a 1), t08 (2 frente a 0), t03 y t04
+  (2 frente a 1). Con las fichas correctas delante, el modelo usa `dose_calculator` más a menudo.
+- **Pierde:** t13 pasa de 3/3 a 0/3. No es ruido: las tres ejecuciones de cada brazo recuperan los mismos
+  pasajes (sin filtro 0004, 0012, 0014, 0013, 0007; con filtro 0004, 0012, 0005, 0050, 0011) y contestan
+  igual (4 mL sin filtro, 2 mL con filtro, tomando el extremo bajo del rango de 20-40 mg).
+- **Igual:** t01, t07, t14, t15, t16 y t18 aciertan 3/3 en los dos brazos, y t09, t11, t12, t19 y t20
+  fallan 0/3 en los dos. t06, t10 y t17 cambian de una ejecución a otra.
+- **t19 y t20** ya reciben fichas de todos los fármacos (t20: ketamina, furosemida, enoxaparina y
+  aciclovir) y fallan igual: el modelo se equivoca al leerlas o con las unidades (t19 da 1200 mg de
+  vancomicina y 350 mg de aciclovir; t20 pone 80 mL de enoxaparina), y t02 y t20 intentan llamar a
+  `create_preparation_sheet`, que está bloqueada.
+- **t09, t10, t11, t15 y t17** siguen sin la evidencia en el top 5 aunque la ficha sea la correcta: el
+  pasaje concreto no queda entre los cinco primeros de su ficha.
+
+**Qué concluimos.**
+
+1. *El filtro hace lo que debe en la recuperación:* tres tareas más con toda la evidencia y 7 pasajes más
+   con ella, y las tareas con varios fármacos ya reciben fichas de todos ellos. Esto no depende del ruido.
+2. *En el agente la mejora es el éxito fiel, no tanto el éxito.* Pasa de 1,7 a 4,3 de 20 y los rangos no
+   se solapan, aunque son 3 ejecuciones y no una medición definitiva. El éxito total sube pero dentro del
+   ruido. Lo que sigue sin arreglarse en t19 y t20 es del modelo (leer y calcular), no de la recuperación.
+3. *Efecto secundario que no conocíamos:* el filtro cambia el orden dentro de la ficha incluso con un solo
+   fármaco, y eso cuesta t13. Es porque pedimos el ranking de todo el corpus al `HybridRetriever`, cuyo
+   `pool` pasa a ser todos los chunks, y el min-max de las puntuaciones se calcula sobre todo el corpus y
+   no sobre los 20 mejores. El indicador de evidencia no lo detecta, porque los dos pasajes con
+   evidencia de t13 siguen en el top 5.
+4. *`tool` sigue siendo la mitad de bueno que `auto`* (5/20 con y sin filtro), lo que confirma el valor por
+   defecto del #04.
+
+**Decisiones y siguientes pasos.** Se deja el filtro activado por defecto (se apaga con
+`ARCA_DRUG_FILTER=0`) y se da por cerrado el #06. No se arregla el efecto de t13 ahora: la solución es
+quedarse primero con los pasajes del top-k normal que ya sean de los fármacos detectados y completar con el
+ranking filtrado solo cuando falte alguno (con un solo fármaco sería igual que sin filtro), y conviene
+medirla junto con el #05 (cabecera en los chunks), que obliga a reindexar y cambia los números de
+`validate_bench`. A probar después: la recuperación dentro de la ficha (t09, t10, t11, t15, t17: #05, más
+pasajes o un reranker); lo que falla en el modelo aun con las fichas delante (t19, t20: #18, y una
+comprobación numérica estricta, #09); las citas (#25, 0/20 en todos los brazos hasta ahora); y repetir las
+comparaciones con repeticiones (#11), porque las 3 ejecuciones de este experimento ya han mostrado cuánto
+varía una misma configuración.
+
+---
