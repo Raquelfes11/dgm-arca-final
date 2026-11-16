@@ -269,10 +269,10 @@ def test_loop_runs_a_call_written_as_action_json():
     assert "2" in response.steps[0].observation
 
 
-def test_system_prompt_is_formatted_and_keeps_the_example():
+def test_system_prompt_is_formatted():
     prompt = ReActAgent().system_prompt(7)
     assert "at most 7 steps" in prompt
     for leftover in ("{{", "{max_steps}", "{tools_description}"):
         assert leftover not in prompt
-    assert '"name": "final_answer"' in prompt  # the example survived the format() call
+    assert '"name": "final_answer"' in prompt  # the braces of the JSON survived format()
     assert "dose_calculator" in prompt  # the tool descriptions were injected
