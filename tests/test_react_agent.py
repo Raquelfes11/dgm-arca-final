@@ -84,10 +84,67 @@ def test_tool_that_requires_confirmation_is_not_run():
     response = agent.run("task", max_steps=5, brain="base")
     files_after = set(SHEETS_DIR.glob("*")) if SHEETS_DIR.exists() else set()
     assert files_after == files_before  # the PDF was not written
-    assert "requires user confirmation" in response.steps[0].observation
+    assert "BLOQUEADA" in response.steps[0].observation
     assert response.succeeded and response.final_answer == "no puedo"  # the model could go on
     record = agent._call_tool("create_preparation_sheet", {})
     assert not record.ok and record.requires_confirmation
+
+
+def test_blocked_observation_says_explicitly_that_nothing_was_generated():
+    agent = scripted_agent([])
+    record = agent._call_tool("create_preparation_sheet", {})
+    assert "NO se ha generado" in record.error
+    assert "NO EJECUTADA" in record.error
+
+
+SHEET_CALL = tool_call(
+    "create_preparation_sheet",
+    medication="paracetamol",
+    concentration="10 mg/ml",
+    dose="600 mg",
+    administration="60 ml",
+    steps="15 x 40 = 600",
+)
+
+
+def test_final_answer_claiming_a_blocked_sheet_is_flagged_and_corrected():
+    """t23: the model asked for the sheet, was blocked, and still said it was generated."""
+    agent = scripted_agent(
+        [SHEET_CALL, tool_call("final_answer", answer="Son 600 mg. He generado la hoja de preparación.")]
+    )
+    response = agent.run("task", max_steps=5, brain="base")
+    assert response.warnings and "create_preparation_sheet" in response.warnings[0]
+    assert response.final_answer.startswith("AVISO")
+    assert "NO se ha generado" in response.final_answer
+    assert "600 mg" in response.final_answer  # the useful part of the answer is kept
+
+
+def test_final_answer_that_admits_the_sheet_was_blocked_is_not_touched():
+    answer = "Son 600 mg. No he podido generar la hoja de preparación: está bloqueada."
+    agent = scripted_agent([SHEET_CALL, tool_call("final_answer", answer=answer)])
+    response = agent.run("task", max_steps=5, brain="base")
+    assert response.final_answer == answer and response.warnings == []
+
+
+def test_sheet_claimed_without_calling_the_tool_is_flagged():
+    agent = scripted_agent([tool_call("final_answer", answer="Aquí tienes el PDF con la hoja.")])
+    response = agent.run("task", max_steps=3, brain="base")
+    assert response.warnings and response.final_answer.startswith("AVISO")
+
+
+def test_answer_that_does_not_mention_a_sheet_is_not_touched():
+    answer = "Son 600 mg según la ficha técnica."
+    agent = scripted_agent([tool_call("final_answer", answer=answer)])
+    response = agent.run("task", max_steps=3, brain="base")
+    assert response.final_answer == answer and response.warnings == []
+
+
+def test_check_claimed_actions_trusts_a_tool_that_succeeded():
+    from agent.react_agent import check_claimed_actions
+
+    answer = "Hoja de preparación generada."
+    assert check_claimed_actions(answer, {"create_preparation_sheet"}) == (answer, [])
+    assert check_claimed_actions(answer, set())[1]  # same text, tool did not succeed: flagged
 
 
 def test_run_fills_model_and_tokens_used():
