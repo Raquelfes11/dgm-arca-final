@@ -21,6 +21,8 @@ from pathlib import Path
 
 import re
 
+from dotenv import load_dotenv
+
 from agent.memory import ConversationMemory
 from agent.prompts import REACT_SYSTEM_PROMPT, SUMMARY_PROMPT
 from api.schemas import AgentAction, AgentResponse, AgentStep, ToolCallRecord
@@ -28,6 +30,10 @@ from tool_use.registry import ToolRegistry, tool
 from tool_use.tools import default_registry
 from tool_use.parser import THINK_PATTERN, ToolCall, parse_tool_calls
 from rag.retriever import build_retrievers
+
+# The model ids and the adapter live in each teammate's .env. Loading it here means any script
+# that uses the agent finds them, without exporting them by hand. Variables already exported win.
+load_dotenv()
 
 RETRIEVER = "hybrid"
 LAMBDA_BM25 = 0.4  # best MRR in the λ sweep with recursive chunking (EXPERIMENTS.md)
