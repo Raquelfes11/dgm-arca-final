@@ -2848,11 +2848,56 @@ Comparándolo con el análisis realizado el 16/11/2026 con la mejora 4 tenemos l
 | Pasos medios · tokens medios | 1,9 · 8.252 | 1,85 · 7566 |
 
 
-**Qué concluimos.** El modelo nuevo acierta el mismo número de tareas principales aunque es más fiel al formato estricto del <tool_call> el nuevo modelo entrenado con los nuevos chunks. Además, este nuevo modelo consigue un acierto más en un `edge_case`, no necesita consultar la base de vectores ya que tiene más clara la información que recibe en los chunks y reduce el número de tokens medios.
+**Segunda medición: con el filtro del #06 y tres ejecuciones.** La medición de arriba es de una sola
+ejecución y se hizo antes del filtro del #06, porque la rama salió de `main` antes de mergearlo. Tras traer
+`main` a la rama y volver a pasar los tests, repetimos la comparación que usamos en el #06: `thinking` en
+`auto`, con el filtro y los chunks nuevos, tres ejecuciones (`reports/fix05_auto_a.json`, `_b` y `_c`),
+frente a las tres del #06 con los chunks de antes. La recuperación se mide con
+`agent.validate_bench --retrieval`.
 
-Sin embargo, hay 3 casos menos que no llegan a generar una llamada a `final_answer`.
+| | #06 (chunks de antes) | #05 + #06 (chunks con cabecera, 900) |
+|---|---|---|
+| Tareas principales con toda la evidencia en el top 5 | 10/20 | 11/20 |
+| Pasajes con evidencia | 20/33 | 21/33 |
+| Éxito `auto` (de 20) | 12, 10, 10 (media 10,7) | 14, 12, 10 (media 12,0) |
+| Éxito fiel `auto` (de 20) | 5, 5, 3 (media 4,3) | 6, 5, 3 (media 4,7) |
+| Casos de borde `auto` (de 5) | 3, 2, 3 | 2, 2, 3 |
+| Pasos sin llamada válida por ejecución | 8, 8, 10 | 8, 5, 10 |
 
-Por lo tanto, el modelo mejora si mantemos este cambio.
+Por tarea, de las tres ejecuciones de cada brazo:
+
+- **Mejoran:** t09 (de 0/3 a 3/3: el pasaje con la dosis máxima de tobramicina ya entra en el top 5),
+  t13 (de 0/3 a 2/3, recupera lo que había perdido con el filtro) y, una vez de tres, t10 y t20.
+- **Empeoran:** t04 (de 2/3 a 0/3: llama a `dose_calculator` pero en las tres ejecuciones responde 0,08 mL
+  en vez de 0,8 mL) y t16 (de 3/3 a 1/3). No hemos investigado si es un efecto de los chunks nuevos o del
+  modelo.
+- **Igual:** t01, t07, t14, t15 y t18 aciertan en todas, y t11, t12 y t19 fallan en todas. t10, t11,
+  t15 y t17 siguen sin la evidencia en el top 5, y t20 sigue en 2/6 pasajes.
+
+**Qué concluimos.**
+
+1. *La cabecera con el título y la sección no empeora la recuperación y la mejora un poco:* 11/20 tareas con
+   toda la evidencia frente a 10/20, y 21/33 pasajes frente a 20/33. Con el `chunk_size` en 900 se resuelven
+   todas las preguntas del gold, y el MRR sube (0,632 a 0,690) a costa de algo de Recall@5 (0,642 a 0,600).
+2. *En el agente no se puede afirmar una mejora.* Con una sola ejecución (9/20 frente a 9/20, medición de
+   arriba) no había base, y con tres el éxito pasa de 10,7 a 12,0 y el éxito fiel de 4,3 a 4,7 con los
+   rangos solapados (10-14 frente a 10-12, y 3-6 frente a 3-5), dentro del ruido entre ejecuciones. Lo
+   que sí se ve son tareas concretas que cambian de sentido: t09 y t13 mejoran, t04 y t16 empeoran.
+3. *Se han cambiado dos cosas a la vez* (la cabecera y el `chunk_size` de 800 a 900), así que no sabemos
+   cuánto aporta cada una.
+4. *No se ha entrenado ningún modelo nuevo.* En la primera tabla se compara el mismo modelo con chunks
+   distintos, no un modelo "entrenado con los nuevos chunks". Y en esa primera medición, `thinking` deja
+   de llegar a `final_answer` en 3 tareas más que con `auto` del #04 (16/20 frente a 19/20), sin que
+   sepamos si es ruido.
+5. *Sigue sin resolverse el ranking dentro de la ficha* para t10, t11, t15 y t17: la cabecera no lo
+   arregla. Hacen falta más pasajes o un reranker.
+
+**Decisiones y siguientes pasos.** Se acepta el cambio (cabecera con título y sección, y `chunk_size` 900),
+porque cumple lo que nos pusimos como condición: la recuperación no baja de 10/20 y el agente queda
+dentro del rango del #06. El índice denso se rehace solo la primera vez que se usan los chunks nuevos (lleva
+una huella de los chunks). A probar después: separar el efecto de la cabecera y el del `chunk_size`;
+arreglar el efecto del filtro sobre el orden dentro de la ficha (#06); más pasajes o un reranker para
+t10, t11, t15 y t17; y repetir las comparaciones con repeticiones (#11).
 
 ---
 
