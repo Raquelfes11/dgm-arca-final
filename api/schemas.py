@@ -137,6 +137,13 @@ class AgentStep(BaseModel):
         default=False,
         description="True if the agent made this step itself (the automatic search), not the model",
     )
+    call_route: Literal["tag", "fallback"] | None = Field(
+        default=None,
+        description=(
+            "How the tool call of this step was read: tag (a tool_call block) or fallback "
+            "(an Action line). None if the step has no call from the model."
+        ),
+    )
 
 
 class AgentResponse(BaseModel):
@@ -146,3 +153,4 @@ class AgentResponse(BaseModel):
     succeeded: bool = True
     model: str = ""
     tokens_used: int = 0
+    warnings: list[str] = []  # safety flags, e.g. the answer claims an action that did not happen

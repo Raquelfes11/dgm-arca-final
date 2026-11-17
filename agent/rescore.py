@@ -1,7 +1,7 @@
 """Score an evaluation report again with the current benchmark, without running any model.
 
-    uv run python -m agent.rescore --report reports/fix04_auto.json
-    uv run python -m agent.rescore --report reports/fix04_auto.json --out reports/otro.json
+    uv run python -m agent.rescore --report reports/fix/04/fix04_auto.json
+    uv run python -m agent.rescore --report reports/fix/04/fix04_auto.json --out reports/otro.json
 
 The report keeps the final answer of every task, so when the way of checking an answer changes
 (a better regular expression, a stricter number check) the old runs can be scored again instead

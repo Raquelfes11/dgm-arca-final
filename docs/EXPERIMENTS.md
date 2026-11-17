@@ -500,7 +500,7 @@ A continuación, analizaremos los fallos cometidos por el modelo entrenado con g
 
 **Qué queríamos saber.** El modelo entrenado con GRPO sin KL es el que mejor funciona (pass@1 = 0.895), y supera al entrenado con KL (`grpo`, 0.805), a `grpo_group_4` (0.860) y al `sft` (0.805). Queremos saber qué tipo de fallos comete: si son meramente aritméticos o si el modelo ha encontrado alguna forma de reward hacking.
 
-**Qué hicimos.** Seleccionamos cinco trazas del modelo con GRPO sin KL con `is_correct = False` (en `reports/phase1_eval.json`, sección `grpo_sin_kl`). Leímos el enunciado y el razonamiento completo de cada una, comprobando si los pasos que sigue son los que daría una persona al resolver el problema.
+**Qué hicimos.** Seleccionamos cinco trazas del modelo con GRPO sin KL con `is_correct = False` (en `reports/phase1/phase1_eval.json`, sección `grpo_sin_kl`). Leímos el enunciado y el razonamiento completo de cada una, comprobando si los pasos que sigue son los que daría una persona al resolver el problema.
 
 Para cubrir también las respuestas correctas (donde se manifestaría un posible hack), ejecutamos además un filtrado automático, `rlm/scan_hacking.py`, sobre las 200 respuestas de cada modelo. Busca patrones que explotarían huecos de `rlm/rewards.py`:
 - `multi_number`: más de un número dentro de `<answer>` (el verificador toma el último).
@@ -516,19 +516,19 @@ Para cubrir también las respuestas correctas (donde se manifestaría un posible
 Solo el modelo GRPO sin KL, sin comparar con el reward:
 
 ```bash
-python rlm/scan_hacking.py reports/phase1_eval.json --section grpo_sin_kl
+python rlm/scan_hacking.py reports/phase1/phase1_eval.json --section grpo_sin_kl
 ```
 
 Solo el modelo GRPO sin KL, comparando además con el verificador del entrenamiento (`rlm/rewards.py`):
 
 ```bash
-python rlm/scan_hacking.py reports/phase1_eval.json --section grpo_sin_kl --reward-module rlm/rewards.py
+python rlm/scan_hacking.py reports/phase1/phase1_eval.json --section grpo_sin_kl --reward-module rlm/rewards.py
 ```
 
 Todos los modelos a la vez, para comparar:
 
 ```bash
-python rlm/scan_hacking.py reports/phase1_eval.json --reward-module rlm/rewards.py
+python rlm/scan_hacking.py reports/phase1/phase1_eval.json --reward-module rlm/rewards.py
 ```
 
 Opciones útiles: `--show N` imprime N ejemplos por cada flag (por defecto 5), y se puede redirigir la salida a un fichero, por ejemplo `> reports/hacking_scan.txt`.
@@ -663,12 +663,12 @@ tokens nuevos) sobre `rlm/data/test_ood.jsonl`: 100 problemas, 50 de `infusion` 
 mcg/kg/min a velocidad en mL/h) y 50 de `infusion_inverse` (de velocidad a dosis en
 mcg/kg/min). Ninguna de las dos familias está en train ni en test, y los 100 problemas son de
 nivel 4 (train y test solo llegan al nivel 3). Lo comparamos con el pass@1 en test (200
-problemas) que ya teníamos en `reports/phase1_eval.json`.
+problemas) que ya teníamos en `reports/phase1/phase1_eval.json`.
 
 ```bash
 uv run python -m rlm.evaluate --data rlm/data/test_ood.jsonl \
   --adapters sft=rlm/weights/sft_lora grpo_sin_kl=rlm/weights/final_rlm_lora_sin_kl \
-  --out reports/phase1_eval_ood.json --history reports/phase1_pass1_ood.png
+  --out reports/phase1/phase1_eval_ood.json --history reports/phase1_pass1_ood.png
 uv run python -m rlm.compare_ood --rescore --models sft grpo_sin_kl
 ```
 
@@ -736,10 +736,10 @@ corregir eran 20/100 y 27/100.
   terminan, aciertan 24/60 (SFT) y 30/65 (GRPO); es un dato descriptivo, no una comparación
   limpia.
 - Limitaciones: 100 problemas; una sola generación greedy por problema; una sola semilla de
-  entrenamiento por modelo. `reports/phase1_eval_ood.json` guarda los veredictos del momento
+  entrenamiento por modelo. `reports/phase1/phase1_eval_ood.json` guarda los veredictos del momento
   de generar (20/100 y 27/100), y el gráfico `phase1_pass1_ood.png` que genera `rlm.evaluate`
   los refleja, pero ese gráfico está en el `.gitignore` y no se sube al repositorio. Las cifras
-  corregidas son las de esta entrada y las de `reports/ood_comparison.md`, que sí se suben.
+  corregidas son las de esta entrada y las de `reports/phase1/ood_comparison.md`, que sí se suben.
 - Siguientes pasos posibles, sin hacer: un OOD más suave con `--ood-mode weight` (mismas
   familias, pesos de 2 a 9,9 kg) para ver una degradación que no sea total; repetir con más
   tokens para separar los fallos por truncado; y más problemas por conjunto.
@@ -949,9 +949,9 @@ voraz, `enable_thinking=False`, 1024 tokens máximo, 5 turnos, una sola ejecuci�
 se ejecutó (`allow_side_effects=False`): el modelo recibe que requiere confirmación.
 
 ```bash
-uv run python -m tool_use.evaluate --model-id Qwen/Qwen3-0.6B --out reports/phase2_eval_qwen3-0.6b.json
-uv run python -m tool_use.evaluate --model-id Qwen/Qwen3-1.7B --out reports/phase2_eval_qwen3-1.7b.json
-uv run python -m tool_use.evaluate --rescore reports/phase2_eval_qwen3-0.6b.json   # sin modelo
+uv run python -m tool_use.evaluate --model-id Qwen/Qwen3-0.6B --out reports/phase2/phase2_eval_qwen3-0.6b.json
+uv run python -m tool_use.evaluate --model-id Qwen/Qwen3-1.7B --out reports/phase2/phase2_eval_qwen3-1.7b.json
+uv run python -m tool_use.evaluate --rescore reports/phase2/phase2_eval_qwen3-0.6b.json   # sin modelo
 ```
 
 **Una corrección de la medición.** La primera puntuación aceptaba un número dentro del 0,5 %, y
@@ -1084,9 +1084,9 @@ ejecución, hoja PDF sin ejecutar.
 
 ```bash
 uv run python -m tool_use.evaluate --adapter rlm/weights/final_rlm_lora_sin_kl --thinking \
-  --no-tools-prompt phase1 --out reports/phase2_eval_qwen3-0.6b_grpo.json
+  --no-tools-prompt phase1 --out reports/phase2/phase2_eval_qwen3-0.6b_grpo.json
 uv run python -m tool_use.evaluate --adapter raquelfes11/dgm-arca-sft-lora --thinking \
-  --no-tools-prompt phase1 --out reports/phase2_eval_qwen3-0.6b_sft.json
+  --no-tools-prompt phase1 --out reports/phase2/phase2_eval_qwen3-0.6b_sft.json
 ```
 
 **Qué no permite separar esta prueba.** Los Qwen3 se ejecutaron con razonamiento desactivado y prompt
@@ -1223,9 +1223,9 @@ otra. Los 77 tests de herramientas, registro, parser, banco y ejecutor pasan con
 
 ```bash
 uv run python -m tool_use.evaluate --conditions tools \
-  --out reports/phase2_eval_qwen3-0.6b_desc.json
+  --out reports/phase2/phase2_eval_qwen3-0.6b_desc.json
 uv run python -m tool_use.evaluate --conditions tools --adapter raquelfes11/dgm-arca-sft-lora \
-  --thinking --no-tools-prompt phase1 --out reports/phase2_eval_qwen3-0.6b_sft_desc.json
+  --thinking --no-tools-prompt phase1 --out reports/phase2/phase2_eval_qwen3-0.6b_sft_desc.json
 ```
 
 **Qué pasó.**
@@ -1300,9 +1300,9 @@ antes, una ejecución voraz por modelo:
 
 ```bash
 uv run python -m tool_use.evaluate --conditions tools \
-  --out reports/phase2_eval_qwen3-0.6b_prompt.json
+  --out reports/phase2/phase2_eval_qwen3-0.6b_prompt.json
 uv run python -m tool_use.evaluate --conditions tools --adapter raquelfes11/dgm-arca-sft-lora \
-  --thinking --no-tools-prompt phase1 --out reports/phase2_eval_qwen3-0.6b_sft_prompt.json
+  --thinking --no-tools-prompt phase1 --out reports/phase2/phase2_eval_qwen3-0.6b_sft_prompt.json
 ```
 
 **Qué pasó.**
@@ -1408,7 +1408,7 @@ Recall@5 y MRR sobre las 50 preguntas. Una pregunta cuya evidencia no cabe enter
 chunk cuenta como fallo. Embeddings con Qwen3-Embedding-0.6B y `max_chunk_chars=1500`:
 
 ```bash
-uv run python -m rag.evaluate --gold rag/gold/gold.jsonl --k 5 --thresholds 0.5 0.6 0.65 0.7 0.75 0.8 0.85 0.9 --out reports/phase3_threshold_sweep.json
+uv run python -m rag.evaluate --gold rag/gold/gold.jsonl --k 5 --thresholds 0.5 0.6 0.65 0.7 0.75 0.8 0.85 0.9 --out reports/phase3/phase3_threshold_sweep.json
 ```
 
 El mismo comando cuenta también por qué se cierra cada chunk: por superar el umbral (corte
@@ -1470,7 +1470,7 @@ evidencia del gold dentro del texto de los chunks. Con eso calcula Recall@5 y MR
 retriever y repite el híbrido con λ de 0 a 1 en pasos de 0.1:
 
 ```bash
-uv run python -m rag.evaluate --gold rag/gold/gold.jsonl --k 5 --out reports/phase3_eval.json
+uv run python -m rag.evaluate --gold rag/gold/gold.jsonl --k 5 --out reports/phase3/phase3_eval.json
 ```
 
 **Qué pasó.** Todas las métricas son sobre las preguntas resueltas, las que tienen algún chunk
@@ -1788,7 +1788,7 @@ del gold con fragmento resuelto. Se compararon seis instrucciones (`QUERY_INSTRU
 uv run python -m rag.evaluate --gold rag/gold/gold.jsonl --k 5 --lam 0.4 --instruction-sweep
 ```
 
-Resultados completos en `reports/phase3_instruction_sweep.json`. "Gana/pierde" son los números de
+Resultados completos en `reports/phase3/phase3_instruction_sweep.json`. "Gana/pierde" son los números de
 pregunta (desde 1) que el denso acierta/falla respecto a `default`.
 
 **Qué pasó.**
@@ -1887,7 +1887,7 @@ Los ids inventados siguen siendo 0 y ninguna de las 8 preguntas sin respuesta ci
 
 Comprobamos que la API sigue funcionando: los tests pasan, los tres retrievers de
 `POST /rag` responden con el campo nuevo y un retriever inválido sigue dando 422. Los resultados de
-recuperación no cambian (`reports/phase3_eval.json`, el barrido del umbral y el de instrucciones
+recuperación no cambian (`reports/phase3/phase3_eval.json`, el barrido del umbral y el de instrucciones
 salen idénticos) y los tres modelos sin adaptador no se ven afectados: sus respuestas más largas son
 de 296, 686 y 750 tokens, por debajo del límite antiguo.
 
@@ -2301,14 +2301,14 @@ título de la ficha a cada chunk en `rag/chunking.py` y repetir `rag.evaluate`.
 export ARCA_RLM_ADAPTER=rlm/weights/final_rlm_lora_sin_kl
 export ARCA_RLM_ADAPTER_REPO=isamorell/dgm-arca-rlm-lora-sin-kl
 uv run python -m agent.evaluate --bench agent/bench/tasks.jsonl --brains base rlm thinking
-uv run python -m agent.analyze_eval --markdown reports/phase4_analysis.md
+uv run python -m agent.analyze_eval --markdown reports/phase4/phase4_analysis.md
 ```
 
 `base` es Qwen3-0.6B, `rlm` es ese modelo con el adaptador GRPO sin KL y `thinking` es Qwen3-1.7B.
-`agent/analyze_eval.py` lee `reports/phase4_eval.json` y, además de la tasa de éxito, saca el éxito
+`agent/analyze_eval.py` lee `reports/phase4/phase4_eval.json` y, además de la tasa de éxito, saca el éxito
 "fiel" (correcto y con las herramientas requeridas), los pasos sin llamada válida, las respuestas vacías,
 el uso de la base de conocimiento y una clasificación de cada fallo en una sola clase. Resultados
-completos en `reports/phase4_eval.json` y `reports/phase4_analysis.md`.
+completos en `reports/phase4/phase4_eval.json` y `reports/phase4/phase4_analysis.md`.
 
 **Qué pasó.**
 
@@ -2385,7 +2385,7 @@ cerebro:
 
 ```
 uv run python -m agent.evaluate --bench agent/bench/tasks.jsonl --brains base rlm thinking
-uv run python -m agent.analyze_eval --markdown reports/phase4_analysis.md
+uv run python -m agent.analyze_eval --markdown reports/phase4/phase4_analysis.md
 ```
 
 **Qué pasó.** Entre paréntesis, el valor de la primera evaluación.
@@ -2410,8 +2410,8 @@ Por clase de fallo, en las 20 tareas principales:
 | Responde sin usar las herramientas necesarias | 13/20 | 18/20 | 10/20 |
 | Usa las herramientas necesarias pero el resultado es incorrecto | 0/20 | 0/20 | 3/20 |
 
-El único acierto de `rlm` (t14) no usó las herramientas requeridas, por eso su éxito fiel es 0. Los resultados completos están en `reports/phase4_eval.json` y
-`reports/phase4_analysis.md`.
+El único acierto de `rlm` (t14) no usó las herramientas requeridas, por eso su éxito fiel es 0. Los resultados completos están en `reports/phase4/phase4_eval.json` y
+`reports/phase4/phase4_analysis.md`.
 
 **Qué concluimos.** Los cambios arreglan lo que pretendían: las respuestas vacías de `rlm` pasan de 9 a
 0, casi todas las ejecuciones terminan con una respuesta (de 3, 10 y 15 de 20 a 14, 19 y 18) y los pasos
@@ -2458,15 +2458,15 @@ que tenían `Action:` con JSON o fallos de formato en la primera evaluación. Ci
 
 | Informe | Código | Modelo |
 |---|---|---|
-| `reports/phase4_eval.json` | ARCA original | Qwen3-1.7B |
-| `reports/fix01_control_main.json` | `main` (arreglo del 11-11) | Qwen3-1.7B |
-| `reports/fix01_parser_only.json` | #01: solo parser, prompt de `main` | Qwen3-1.7B |
-| `reports/fix01_check.json` | #01: parser + ejemplo (`exp_01b_prompt_example`) | Qwen3-1.7B |
-| `reports/fix01_check_qwen3-4b.json` | #01: parser + ejemplo | Qwen3-4B |
+| `reports/phase4/phase4_eval.json` | ARCA original | Qwen3-1.7B |
+| `reports/fix/01/fix01_control_main.json` | `main` (arreglo del 11-11) | Qwen3-1.7B |
+| `reports/fix/01/fix01_parser_only.json` | #01: solo parser, prompt de `main` | Qwen3-1.7B |
+| `reports/fix/01/fix01_check.json` | #01: parser + ejemplo (`exp_01b_prompt_example`) | Qwen3-1.7B |
+| `reports/fix/01/fix01_check_qwen3-4b.json` | #01: parser + ejemplo | Qwen3-4B |
 
 ```
-uv run python -m agent.evaluate --brains thinking --ids t04 t09 t20 --out reports/fix01_parser_only.json
-uv run python -m agent.analyze_eval --report reports/fix01_parser_only.json --no-grid
+uv run python -m agent.evaluate --brains thinking --ids t04 t09 t20 --out reports/fix/01/fix01_parser_only.json
+uv run python -m agent.analyze_eval --report reports/fix/01/fix01_parser_only.json --no-grid
 export ARCA_THINKING_MODEL=Qwen/Qwen3-4B   # solo para la del 4B
 ```
 
@@ -2589,9 +2589,9 @@ Evaluación: `thinking` (Qwen3-1.7B), las 25 tareas del banco (20 principales y 
 ejecución por brazo, con el prompt de `main` (sin el ejemplo del #01):
 
 ```
-uv run python -m agent.evaluate --brains thinking --rag-mode off --no-tools --out reports/fix04_solo.json
-uv run python -m agent.evaluate --brains thinking --rag-mode tool --out reports/fix04_tool.json
-uv run python -m agent.evaluate --brains thinking --rag-mode auto --out reports/fix04_auto.json
+uv run python -m agent.evaluate --brains thinking --rag-mode off --no-tools --out reports/fix/04/fix04_solo.json
+uv run python -m agent.evaluate --brains thinking --rag-mode tool --out reports/fix/04/fix04_tool.json
+uv run python -m agent.evaluate --brains thinking --rag-mode auto --out reports/fix/04/fix04_auto.json
 ```
 
 **Qué pasó.** Tres brazos: el modelo solo (sin base de conocimiento ni herramientas), la base como
@@ -2704,9 +2704,9 @@ inventadas.
   prueba.
 
 ```
-uv run python -m agent.rescore --report reports/fix04_solo.json
-uv run python -m agent.rescore --report reports/fix04_tool.json
-uv run python -m agent.rescore --report reports/fix04_auto.json
+uv run python -m agent.rescore --report reports/fix/04/fix04_solo.json
+uv run python -m agent.rescore --report reports/fix/04/fix04_tool.json
+uv run python -m agent.rescore --report reports/fix/04/fix04_auto.json
 ```
 
 **Qué pasó.** Las tareas principales no cambian (el comprobador de esas es otro) y los casos de borde
@@ -2748,18 +2748,18 @@ uv run python -m rag.download_corpus --from-manifest
 
 Para determinar si el rendimiento del modelo mejoraba, ejecutamos el siguiente comando:
 ```bash
-uv run python -m rag.evaluate --gold rag/gold/gold.jsonl --k 5 --out reports/rag/phase3_eval_exp5.json
+uv run python -m rag.evaluate --gold rag/gold/gold.jsonl --k 5 --out reports/fix/05/phase3_eval_exp5.json
 ```
 
 Ejecutamos una segunda vez ese comando con chunk_size = 900 para compensar que hemos añadido texto adicional a cada chunk:
 
 ```bash
-uv run python -m rag.evaluate --gold rag/gold/gold.jsonl --k 5 --out reports/rag/phase3_eval_exp5_chunk_size.json
+uv run python -m rag.evaluate --gold rag/gold/gold.jsonl --k 5 --out reports/fix/05/phase3_eval_exp5_chunk_size900.json
 ```
 
 **Qué pasó.** 
 
-Con chunk_size = 800 (resultados en `reports/rag/phase3_eval_exp5.json`):
+Con chunk_size = 800 (resultados en `reports/fix/05/phase3_eval_exp5.json`):
 
 Todas las métricas son sobre las preguntas resueltas, las que tienen algún chunk que contiene su evidencia: 48 en recursivo y 47 en semántico. Barrido de λ del híbrido (peso de BM25; λ = 0 es el denso solo y λ = 1 es BM25 solo), con el mejor λ de cada chunking en negrita:
 
@@ -2770,7 +2770,7 @@ Todas las métricas son sobre las preguntas resueltas, las que tienen algún chu
 | Semántico Recall@5 | **0.631** | 0.625 | 0.625 | 0.608 | 0.608 | 0.586 | 0.586 | 0.553 | 0.521 | 0.460 | 0.482 |
 | Semántico MRR | 0.624 | 0.631 | 0.668 | 0.668 | **0.670** | 0.667 | 0.575 | 0.533 | 0.495 | 0.457 | 0.460 |
 
-Con chunk_size = 900 (resultados en `reports/rag/phase3_eval_exp5_chunk_size.json`):
+Con chunk_size = 900 (resultados en `reports/fix/05/phase3_eval_exp5_chunk_size900.json`):
 
 | λ | 0.0 | 0.1 | 0.2 | 0.3 | 0.4 | 0.5 | 0.6 | 0.7 | 0.8 | 0.9 | 1.0 |
 |---|---|---|---|---|---|---|---|---|---|---|---|
@@ -2804,16 +2804,16 @@ Las preguntas sin resolver son las mismas salvo al aumentar el chunk_size debido
 **Qué hicimos.** Para saber si el cambio mejoraba el agente ejecutamos el siguiente comando:
 
 ```
-uv run python -m agent.evaluate --bench agent/bench/tasks.jsonl --brains base rlm thinking --out reports/agent/phase4_eval_exp5.json
+uv run python -m agent.evaluate --bench agent/bench/tasks.jsonl --brains base rlm thinking --out reports/fix/05/phase4_eval_exp5.json
 ```
 
 Y para obtener más información sobre los resultados y dónde ha fallado el modelo ejecutamos este comando:
 
 ```
-uv run python -m agent.analyze_eval --report reports/agent/phase4_eval_exp5.json
+uv run python -m agent.analyze_eval --report reports/fix/05/phase4_eval_exp5.json
 ```
 
-**Qué pasó.** Recuperando los resultados del dichero `reports/agents/phase4_eval_exp5.json`, construimos la siguiente tabla escribiendo entre paréntesis, el valor de la evaluación llevada a cabo el 2026-11-11:
+**Qué pasó.** Recuperando los resultados del dichero `reports/fix/05/phase4_eval_exp5.json`, construimos la siguiente tabla escribiendo entre paréntesis, el valor de la evaluación llevada a cabo el 2026-11-11:
 
 | | base | rlm | thinking |
 |---|---|---|---|
@@ -2851,7 +2851,7 @@ Comparándolo con el análisis realizado el 16/11/2026 con la mejora 4 tenemos l
 **Segunda medición: con el filtro del #06 y tres ejecuciones.** La medición de arriba es de una sola
 ejecución y se hizo antes del filtro del #06, porque la rama salió de `main` antes de mergearlo. Tras traer
 `main` a la rama y volver a pasar los tests, repetimos la comparación que usamos en el #06: `thinking` en
-`auto`, con el filtro y los chunks nuevos, tres ejecuciones (`reports/fix05_auto_a.json`, `_b` y `_c`),
+`auto`, con el filtro y los chunks nuevos, tres ejecuciones (`reports/fix/05/fix05_auto_a.json`, `_b` y `_c`),
 frente a las tres del #06 con los chunks de antes. La recuperación se mide con
 `agent.validate_bench --retrieval`.
 
@@ -2987,5 +2987,124 @@ pasajes o un reranker); lo que falla en el modelo aun con las fichas delante (t1
 comprobación numérica estricta, #09); las citas (#25, 0/20 en todos los brazos hasta ahora); y repetir las
 comparaciones con repeticiones (#11), porque las 3 ejecuciones de este experimento ya han mostrado cuánto
 varía una misma configuración.
+
+---
+
+### 2026-11-17 · Proyecto final · #03 Avisar de que el agente no puede ejecutar tools
+
+**Qué queríamos saber.** En el #04 vimos que en t23 (calcular una dosis y generar la hoja de preparación en
+PDF) el modelo dice que la hoja se ha generado cuando `create_preparation_sheet` está bloqueada porque necesita
+confirmación del usuario. Queríamos saber si, con un mensaje de bloqueo más explícito, una regla en el prompt y
+una comprobación en código, la respuesta final deja de presentar como hecho algo que no se ha ejecutado, y lo
+dice, tanto con esa herramienta como cuando una herramienta falle por otro motivo.
+
+**Qué hicimos.** Cambios en la rama `fix_03_blocked_tool_honesty`, en tres capas, porque el modelo puede
+afirmar una hoja que no existe por motivos distintos. Primero, el mensaje que recibe cuando la herramienta
+está bloqueada (o supera el tiempo límite): antes era una frase en inglés que podía leer como un trámite
+pendiente, y ahora empieza por `HERRAMIENTA NO EJECUTADA`, dice en mayúsculas que NO se ha generado ningún
+resultado ni archivo y le pide que lo diga en la respuesta final (`agent/react_agent.py`). Segundo, una regla
+en el prompt: si una herramienta está bloqueada o falla y no hay otra vía, esa acción no ocurrió y hay que
+decirlo (`agent/prompts.py`). Tercero, una comprobación en código: el bucle apunta qué herramientas
+devolvieron éxito y, si la respuesta final habla de la hoja de preparación sin que `create_preparation_sheet`
+haya funcionado y sin reconocerlo, antepone un `AVISO:` y rellena el campo nuevo `AgentResponse.warnings`
+(`react_agent.py`, `api/schemas.py`). Se corrige el texto y no solo el campo porque en un dominio clínico una
+hoja afirmada que no existe es un error de seguridad y quien lea la respuesta puede no mirar los metadatos.
+La comprobación solo mira si la herramienta tuvo éxito, no por qué falló.
+Descartamos dejar crear la hoja sin confirmación: t23 dejaría de medir lo que mide y el fallo de fondo
+seguiría ahí para cualquier otro error de la herramienta.
+
+Añadimos 6 tests en `tests/test_react_agent.py` y actualizamos el de bloqueo, que comprobaba el texto antiguo.
+Al escribirlos vimos que el primer texto del aviso no pasaba el `check` de t23, que exige "requiere" o
+"confirmación", y lo cambiamos para que sí. Lo medimos con `agent.evaluate --brains thinking --ids t23` (`reports/fix/03/fix03_t23.json`).
+
+**Qué pasó.** Antes del cambio, t23 con `thinking` y `auto` fallaba en las 7 ejecuciones de #04, #05 y #06
+(`fix04_auto`, `fix05_auto_a/b/c`, `fix06_auto`, `_b`, `_c`): el modelo pedía la hoja, recibía el bloqueo y
+escribía cosas como "la hoja de preparación en PDF se genera con la siguiente información". Con el cambio,
+en una ejecución (`fix03_t23`) el modelo calculó los 600 mg con `dose_calculator`, pidió la hoja, recibió el
+nuevo `HERRAMIENTA NO EJECUTADA` y contestó: "No se puede generar la hoja de preparación debido a que la
+herramienta 'create_preparation_sheet' está bloqueada". t23 sale correcta. `warnings` quedó vacío: el modelo ya
+reconocía el bloqueo por sí solo y la comprobación en código no tuvo que intervenir. La mejora, por tanto,
+viene del mensaje y del prompt; la comprobación en código solo está verificada con los tests de respuestas
+fijadas, no con un modelo real. No hemos repetido t23 ni lanzado el banco completo.
+
+**Qué concluimos.** Con una ejecución, el mensaje de observación y la regla del prompt bastan para que `thinking`
+reconozca en t23 que la hoja no se generó, pasando de 0 de 7 a 1 de 1. Es un indicio y no una medición: el
+modelo varía entre ejecuciones (alrededor de ±3 tareas de 20 en el banco completo) y no sabemos con qué
+frecuencia acertaría. No podemos separar qué parte se debe al mensaje y cuál al prompt, ni decir nada de la
+comprobación en código con modelos reales, porque no ha llegado a dispararse. Lo que sí garantiza esa capa,
+y es la razón de mantenerla, es que si el modelo vuelve a afirmar la hoja, la respuesta sale corregida y
+marcada. Limitaciones: la comprobación solo conoce la hoja de preparación (el mapa `CLAIM_PATTERNS` tiene una
+entrada), y los patrones que detectan la mención ("hoja de preparación", "PDF", "la hoja") pueden dar falsos
+positivos en respuestas de otras tareas que no hemos medido. Falta repetir t23 tres veces, lanzar el banco
+completo para comprobar que ninguna tarea principal baja, y decidir en el #27 si la herramienta se permite o
+se mantiene bloqueada.
+
+---
+
+### 2026-11-17 · Proyecto final · Formato de las llamadas: etiqueta frente a respaldo `Action:` (primer nivel del #12)
+
+**Qué queríamos saber.** Desde el #01 el agente acepta una llamada escrita como `Action: {json}` cuando no hay
+bloque `<tool_call>`. Ese respaldo cuenta la llamada como válida, así que esconde los fallos de formato: no
+sabíamos cuántas llamadas válidas salen de la etiqueta y cuántas del respaldo, ni cuánto cumple el modelo el
+formato pedido. Isa lo planteó así y queda como primer nivel del #12 (formato válido).
+
+**Qué hicimos.** Cambios en la rama `feat_format_route`, sin cambiar el comportamiento del agente:
+
+- **`api/schemas.py`.** `AgentStep` tiene un campo nuevo, `call_route`, con `"tag"` (llamada leída de un bloque
+  `<tool_call>`), `"fallback"` (leída de una línea `Action:`) o `None` (paso sin llamada válida o búsqueda
+  automática).
+- **`agent/react_agent.py`.** En `_run_loop` la ruta empieza en `"tag"` y pasa a `"fallback"` solo si la llamada
+  sale de `_action_line_fallback`. Se guarda en los pasos con acción (llamada normal, `final_answer` y bucle
+  detectado).
+- **`agent/analyze_eval.py`.** Tres filas nuevas: llamadas leídas de la etiqueta y del respaldo, sobre las
+  llamadas válidas, y cumplimiento del formato (llamadas válidas por etiqueta sobre todos los pasos del
+  modelo). Los informes anteriores no guardan el campo y salen como "sin dato".
+- **Tests.** 3 en `tests/test_react_agent.py` (etiqueta, respaldo y paso sin llamada) y 2 en
+  `tests/test_analyze_eval.py` (reparto de rutas e informe antiguo).
+
+Una ejecución de `thinking` en `auto`, con el filtro y los chunks nuevos (`reports/fix/format_route/format_a.json`):
+
+```
+uv run python -m agent.evaluate --brains thinking --rag-mode auto --out reports/fix/format_route/format_a.json
+uv run python -m agent.analyze_eval --report reports/fix/format_route/format_a.json --no-grid
+```
+
+**Qué pasó.** Sobre las 20 tareas principales:
+
+| | thinking |
+|---|---|
+| Llamadas leídas de la etiqueta `<tool_call>` | 25/27 (93 %) |
+| Llamadas leídas del respaldo `Action:` | 2/27 (7 %) |
+| Cumplen el formato (llamada válida con etiqueta) | 25/37 (68 %) |
+| Pasos sin llamada válida | 10/37 (27 %) |
+| Éxito · éxito fiel · casos de borde | 12/20 · 4/20 · 2/5 |
+
+El respaldo solo se usa en dos tareas (t16 y t19), una vez cada una, y una de esas llamadas es un
+`final_answer`. Los 10 pasos sin llamada válida están repartidos en 8 tareas (t02 y t06 con dos, y t04, t05,
+t11, t16, t17 y t20 con uno). Lo que escribe el modelo en esos pasos es razonamiento largo sin llamada (t04,
+t06, t16, t17), una respuesta final como texto, "Final Answer: Se debe tomar 21 mL" (t05), una llamada
+descrita en lenguaje natural, "Action: call dose_calculator with expression ..." (t02), o un comentario
+sobre el error de una herramienta (t11). El aviso tras el primer fallo funciona en 8 de los 9 primeros fallos
+(el paso siguiente ya es válido, con la etiqueta salvo en t16, que usa el respaldo); en t02 el modelo falla
+dos veces seguidas y la ejecución termina sin respuesta. Los resultados de éxito caen dentro de los rangos
+del #05 (éxito 10-14, fiel 3-6, borde 2-3).
+
+**Qué concluimos.**
+
+1. *El respaldo apenas se usa:* 2 de 27 llamadas válidas. El problema de formato dominante no es que el modelo
+   escriba la llamada con otra forma, sino que no escribe ninguna: 27 % de los pasos, un 68 % de
+   cumplimiento. Con esta medida el #01 explica poco del resto de la mejora desde ARCA (44 % de pasos sin
+   llamada en la línea base): no podemos separar el efecto del #01, del aviso y de la búsqueda automática.
+2. *El aviso tras el primer fallo recupera casi todo:* 8 de 9. Es lo que impide que los pasos sin llamada se
+   conviertan en tareas perdidas, y t02 muestra el caso en que no basta.
+3. *Es una sola ejecución:* con 27 llamadas válidas, que sean 2 del respaldo o 0 o 5 en otra ejecución no se
+   distingue. Hay que repetir (#11) antes de dar el 7 % como cifra estable.
+
+**Decisiones y siguientes pasos.** Se mantiene el respaldo por ahora, porque cuesta nada y rescata alguna
+llamada. Más adelante, tras el SFT, si el respaldo sigue en torno a cero se quita, y las trazas de
+entrenamiento (#20) deben usar solo la etiqueta. Lo que queda por atacar es el 27 % de pasos sin llamada:
+el formato nativo de Qwen3 o la decodificación restringida (#19), y el texto del aviso, que sigue pendiente
+de decidir en el equipo ("Do not write 'Action: name'" frente a no decir nada del `Action:`). Los
+siguientes niveles del #12 (herramienta correcta, argumentos y respuesta) quedan por hacer.
 
 ---

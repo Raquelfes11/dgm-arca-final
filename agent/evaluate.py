@@ -136,7 +136,7 @@ def main() -> None:
     parser.add_argument("--brains", nargs="+", default=["rlm"])
     parser.add_argument("--ids", nargs="+", default=None, help="run only these task ids")
     parser.add_argument("--max-steps", type=int, default=10)
-    parser.add_argument("--out", default="reports/phase4_eval.json")
+    parser.add_argument("--out", default="reports/phase4/phase4_eval.json")
     parser.add_argument(
         "--rag-mode",
         choices=["auto", "tool", "off"],

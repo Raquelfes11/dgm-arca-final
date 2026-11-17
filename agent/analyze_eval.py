@@ -1,8 +1,8 @@
-"""Read reports/phase4_eval.json and explain why each brain fails, not only how often.
+"""Read reports/phase4/phase4_eval.json and explain why each brain fails, not only how often.
 
     uv run python -m agent.analyze_eval
-    uv run python -m agent.analyze_eval --report reports/phase4_eval.json \\
-        --markdown reports/phase4_analysis.md
+    uv run python -m agent.analyze_eval --report reports/phase4/phase4_eval.json \\
+        --markdown reports/phase4/phase4_analysis.md
 
 The success rate of agent/evaluate.py is one number per brain. When it is low it does not
 say whether the model reasons badly, never calls a tool, writes calls the parser cannot read,
@@ -70,6 +70,9 @@ def analyse_brain(rows: list[dict]) -> dict:
         "edge_correct": sum(r["correct"] for r in edge),
         "invalid_steps": sum(1 for s in steps if s.get("action") is None),
         "n_steps": len(steps),
+        "has_route": any("call_route" in s for s in steps),  # old reports do not have it
+        "tag_calls": sum(1 for s in steps if s.get("call_route") == "tag"),
+        "fallback_calls": sum(1 for s in steps if s.get("call_route") == "fallback"),
         "empty_answers": sum(
             1 for r in core if r["succeeded"] and not str(r.get("final_answer", "")).strip()
         ),
@@ -105,6 +108,11 @@ def _pct(part: int, total: int) -> str:
     return f"{part}/{total} ({100 * _rate(part, total):.0f} %)"
 
 
+def _route_pct(metrics: dict, part: int, total: int) -> str:
+    """A percentage of the call route metrics, or no data for reports made before they existed."""
+    return _pct(part, total) if metrics["has_route"] else "sin dato"
+
+
 def render(analysis: dict, grid: bool = True) -> str:
     """The analysis as Markdown tables, ready to paste into the report."""
     brains = analysis["brains"]
@@ -125,6 +133,12 @@ def render(analysis: dict, grid: bool = True) -> str:
         ("Llegan a final_answer", lambda m: _pct(m["finished"], m["n_core"])),
         ("Casos de borde acertados", lambda m: _pct(m["edge_correct"], m["n_edge"])),
         ("Pasos sin llamada válida", lambda m: _pct(m["invalid_steps"], m["n_steps"])),
+        ("Llamadas leídas de la etiqueta tool_call",
+         lambda m: _route_pct(m, m["tag_calls"], m["tag_calls"] + m["fallback_calls"])),
+        ("Llamadas leídas del respaldo Action",
+         lambda m: _route_pct(m, m["fallback_calls"], m["tag_calls"] + m["fallback_calls"])),
+        ("Cumplen el formato (llamada válida con etiqueta)",
+         lambda m: _route_pct(m, m["tag_calls"], m["n_steps"])),
         ("Respuestas vacías", lambda m: _pct(m["empty_answers"], m["n_core"])),
         ("Busca él mismo en la base de conocimiento (si la necesita)",
          lambda m: _pct(m["kb_used"], m["kb_needed"])),
@@ -158,7 +172,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--report", default="reports/phase4_eval.json")
+    parser.add_argument("--report", default="reports/phase4/phase4_eval.json")
     parser.add_argument("--markdown", default=None, help="also write the tables to this file")
     parser.add_argument("--no-grid", action="store_true", help="omit the task by brain table")
     args = parser.parse_args()
