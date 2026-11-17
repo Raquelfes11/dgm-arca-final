@@ -330,6 +330,29 @@ def test_loop_runs_a_call_written_as_action_json():
     assert "2" in response.steps[0].observation
 
 
+def test_a_call_in_the_tag_is_marked_as_read_from_the_tag():
+    agent = scripted_agent([CALC, tool_call("final_answer", answer="2")])
+    response = agent.run("task", max_steps=4, brain="base")
+    assert [s.call_route for s in response.steps] == ["tag", "tag"]
+
+
+def test_a_call_written_as_action_is_marked_as_the_fallback():
+    step = (
+        "Thought: calculo.\n"
+        'Action: {"name": "dose_calculator", "arguments": {"expression": "1 + 1", "decimals": 2}}'
+    )
+    agent = scripted_agent([step, tool_call("final_answer", answer="2")])
+    response = agent.run("task", max_steps=4, brain="base")
+    assert [s.call_route for s in response.steps] == ["fallback", "tag"]
+
+
+def test_a_step_without_a_valid_call_has_no_route():
+    agent = scripted_agent(["no llamo a ninguna herramienta", tool_call("final_answer", answer="2")])
+    response = agent.run("task", max_steps=4, brain="base")
+    assert response.steps[0].call_route is None  # the step that got the nudge
+    assert response.steps[1].call_route == "tag"
+
+
 def test_system_prompt_is_formatted():
     prompt = ReActAgent().system_prompt(7)
     assert "at most 7 steps" in prompt

@@ -3038,3 +3038,73 @@ entrada), y los patrones que detectan la mención ("hoja de preparación", "PDF"
 positivos en respuestas de otras tareas que no hemos medido. Falta repetir t23 tres veces, lanzar el banco
 completo para comprobar que ninguna tarea principal baja, y decidir en el #27 si la herramienta se permite o
 se mantiene bloqueada.
+
+---
+
+### 2026-11-17 · Proyecto final · Formato de las llamadas: etiqueta frente a respaldo `Action:` (primer nivel del #12)
+
+**Qué queríamos saber.** Desde el #01 el agente acepta una llamada escrita como `Action: {json}` cuando no hay
+bloque `<tool_call>`. Ese respaldo cuenta la llamada como válida, así que esconde los fallos de formato: no
+sabíamos cuántas llamadas válidas salen de la etiqueta y cuántas del respaldo, ni cuánto cumple el modelo el
+formato pedido. Isa lo planteó así y queda como primer nivel del #12 (formato válido).
+
+**Qué hicimos.** Cambios en la rama `feat_format_route`, sin cambiar el comportamiento del agente:
+
+- **`api/schemas.py`.** `AgentStep` tiene un campo nuevo, `call_route`, con `"tag"` (llamada leída de un bloque
+  `<tool_call>`), `"fallback"` (leída de una línea `Action:`) o `None` (paso sin llamada válida o búsqueda
+  automática).
+- **`agent/react_agent.py`.** En `_run_loop` la ruta empieza en `"tag"` y pasa a `"fallback"` solo si la llamada
+  sale de `_action_line_fallback`. Se guarda en los pasos con acción (llamada normal, `final_answer` y bucle
+  detectado).
+- **`agent/analyze_eval.py`.** Tres filas nuevas: llamadas leídas de la etiqueta y del respaldo, sobre las
+  llamadas válidas, y cumplimiento del formato (llamadas válidas por etiqueta sobre todos los pasos del
+  modelo). Los informes anteriores no guardan el campo y salen como "sin dato".
+- **Tests.** 3 en `tests/test_react_agent.py` (etiqueta, respaldo y paso sin llamada) y 2 en
+  `tests/test_analyze_eval.py` (reparto de rutas e informe antiguo).
+
+Una ejecución de `thinking` en `auto`, con el filtro y los chunks nuevos (`reports/fix07_format_a.json`):
+
+```
+uv run python -m agent.evaluate --brains thinking --rag-mode auto --out reports/fix07_format_a.json
+uv run python -m agent.analyze_eval --report reports/fix07_format_a.json --no-grid
+```
+
+**Qué pasó.** Sobre las 20 tareas principales:
+
+| | thinking |
+|---|---|
+| Llamadas leídas de la etiqueta `<tool_call>` | 25/27 (93 %) |
+| Llamadas leídas del respaldo `Action:` | 2/27 (7 %) |
+| Cumplen el formato (llamada válida con etiqueta) | 25/37 (68 %) |
+| Pasos sin llamada válida | 10/37 (27 %) |
+| Éxito · éxito fiel · casos de borde | 12/20 · 4/20 · 2/5 |
+
+El respaldo solo se usa en dos tareas (t16 y t19), una vez cada una, y una de esas llamadas es un
+`final_answer`. Los 10 pasos sin llamada válida están repartidos en 8 tareas (t02 y t06 con dos, y t04, t05,
+t11, t16, t17 y t20 con uno). Lo que escribe el modelo en esos pasos es razonamiento largo sin llamada (t04,
+t06, t16, t17), una respuesta final como texto, "Final Answer: Se debe tomar 21 mL" (t05), una llamada
+descrita en lenguaje natural, "Action: call dose_calculator with expression ..." (t02), o un comentario
+sobre el error de una herramienta (t11). El aviso tras el primer fallo funciona en 8 de los 9 primeros fallos
+(el paso siguiente ya es válido, con la etiqueta salvo en t16, que usa el respaldo); en t02 el modelo falla
+dos veces seguidas y la ejecución termina sin respuesta. Los resultados de éxito caen dentro de los rangos
+del #05 (éxito 10-14, fiel 3-6, borde 2-3).
+
+**Qué concluimos.**
+
+1. *El respaldo apenas se usa:* 2 de 27 llamadas válidas. El problema de formato dominante no es que el modelo
+   escriba la llamada con otra forma, sino que no escribe ninguna: 27 % de los pasos, un 68 % de
+   cumplimiento. Con esta medida el #01 explica poco del resto de la mejora desde ARCA (44 % de pasos sin
+   llamada en la línea base): no podemos separar el efecto del #01, del aviso y de la búsqueda automática.
+2. *El aviso tras el primer fallo recupera casi todo:* 8 de 9. Es lo que impide que los pasos sin llamada se
+   conviertan en tareas perdidas, y t02 muestra el caso en que no basta.
+3. *Es una sola ejecución:* con 27 llamadas válidas, que sean 2 del respaldo o 0 o 5 en otra ejecución no se
+   distingue. Hay que repetir (#11) antes de dar el 7 % como cifra estable.
+
+**Decisiones y siguientes pasos.** Se mantiene el respaldo por ahora, porque cuesta nada y rescata alguna
+llamada. Más adelante, tras el SFT, si el respaldo sigue en torno a cero se quita, y las trazas de
+entrenamiento (#20) deben usar solo la etiqueta. Lo que queda por atacar es el 27 % de pasos sin llamada:
+el formato nativo de Qwen3 o la decodificación restringida (#19), y el texto del aviso, que sigue pendiente
+de decidir en el equipo ("Do not write 'Action: name'" frente a no decir nada del `Action:`). Los
+siguientes niveles del #12 (herramienta correcta, argumentos y respuesta) quedan por hacer.
+
+---

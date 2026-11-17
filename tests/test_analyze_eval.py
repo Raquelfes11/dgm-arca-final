@@ -65,6 +65,26 @@ def test_automatic_steps_are_not_invalid_steps_and_are_counted_apart():
     assert "Con búsqueda automática previa" in text
 
 
+def test_call_route_metrics_split_tag_and_fallback_calls():
+    steps = [
+        {"action": {"name": "dose_calculator"}, "call_route": "fallback"},
+        {"action": None, "call_route": None},
+        {"action": {"name": "final_answer"}, "call_route": "tag"},
+        {"action": {"name": "search_knowledge_base"}, "automatic": True, "call_route": None},
+    ]
+    m = analyse_brain([row("a", steps=steps)])
+    assert (m["tag_calls"], m["fallback_calls"], m["n_steps"]) == (1, 1, 3)
+    text = render(analyse({"x": {"rows": [row("a", steps=steps)]}}))
+    assert "Llamadas leídas de la etiqueta" in text and "1/2 (50 %)" in text
+    assert "Cumplen el formato" in text and "1/3 (33 %)" in text
+
+
+def test_reports_without_call_route_show_no_data():
+    m = analyse_brain([row("a")])
+    assert m["has_route"] is False
+    assert "sin dato" in render(analyse({"x": {"rows": [row("a")]}}))
+
+
 def test_empty_results_do_not_divide_by_zero():
     m = analyse_brain([])
     assert m["n_core"] == 0 and m["mean_steps"] == 0.0
