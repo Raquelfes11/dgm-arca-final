@@ -19,8 +19,12 @@ import os
 import re
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from api.schemas import RagResponse, RetrievedChunk
 from rag.retriever import Hit
+
+load_dotenv()  # the settings below are read when this module is imported, so the .env goes first
 
 logger = logging.getLogger(__name__)
 
