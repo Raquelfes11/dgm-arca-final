@@ -2989,3 +2989,52 @@ comparaciones con repeticiones (#11), porque las 3 ejecuciones de este experimen
 varía una misma configuración.
 
 ---
+
+### 2026-11-17 · Proyecto final · #03 Avisar de que el agente no puede ejecutar tools
+
+**Qué queríamos saber.** En el #04 vimos que en t23 (calcular una dosis y generar la hoja de preparación en
+PDF) el modelo dice que la hoja se ha generado cuando `create_preparation_sheet` está bloqueada porque necesita
+confirmación del usuario. Queríamos saber si, con un mensaje de bloqueo más explícito, una regla en el prompt y
+una comprobación en código, la respuesta final deja de presentar como hecho algo que no se ha ejecutado, y lo
+dice, tanto con esa herramienta como cuando una herramienta falle por otro motivo.
+
+**Qué hicimos.** Cambios en la rama `fix_03_blocked_tool_honesty`, en tres capas, porque el modelo puede
+afirmar una hoja que no existe por motivos distintos. Primero, el mensaje que recibe cuando la herramienta
+está bloqueada (o supera el tiempo límite): antes era una frase en inglés que podía leer como un trámite
+pendiente, y ahora empieza por `HERRAMIENTA NO EJECUTADA`, dice en mayúsculas que NO se ha generado ningún
+resultado ni archivo y le pide que lo diga en la respuesta final (`agent/react_agent.py`). Segundo, una regla
+en el prompt: si una herramienta está bloqueada o falla y no hay otra vía, esa acción no ocurrió y hay que
+decirlo (`agent/prompts.py`). Tercero, una comprobación en código: el bucle apunta qué herramientas
+devolvieron éxito y, si la respuesta final habla de la hoja de preparación sin que `create_preparation_sheet`
+haya funcionado y sin reconocerlo, antepone un `AVISO:` y rellena el campo nuevo `AgentResponse.warnings`
+(`react_agent.py`, `api/schemas.py`). Se corrige el texto y no solo el campo porque en un dominio clínico una
+hoja afirmada que no existe es un error de seguridad y quien lea la respuesta puede no mirar los metadatos.
+La comprobación solo mira si la herramienta tuvo éxito, no por qué falló.
+Descartamos dejar crear la hoja sin confirmación: t23 dejaría de medir lo que mide y el fallo de fondo
+seguiría ahí para cualquier otro error de la herramienta.
+
+Añadimos 6 tests en `tests/test_react_agent.py` y actualizamos el de bloqueo, que comprobaba el texto antiguo.
+Al escribirlos vimos que el primer texto del aviso no pasaba el `check` de t23, que exige "requiere" o
+"confirmación", y lo cambiamos para que sí. Lo medimos con `agent.evaluate --brains thinking --ids t23` (`reports/fix03_t23.json`).
+
+**Qué pasó.** Antes del cambio, t23 con `thinking` y `auto` fallaba en las 7 ejecuciones de #04, #05 y #06
+(`fix04_auto`, `fix05_auto_a/b/c`, `fix06_auto`, `_b`, `_c`): el modelo pedía la hoja, recibía el bloqueo y
+escribía cosas como "la hoja de preparación en PDF se genera con la siguiente información". Con el cambio,
+en una ejecución (`fix03_t23`) el modelo calculó los 600 mg con `dose_calculator`, pidió la hoja, recibió el
+nuevo `HERRAMIENTA NO EJECUTADA` y contestó: "No se puede generar la hoja de preparación debido a que la
+herramienta 'create_preparation_sheet' está bloqueada". t23 sale correcta. `warnings` quedó vacío: el modelo ya
+reconocía el bloqueo por sí solo y la comprobación en código no tuvo que intervenir. La mejora, por tanto,
+viene del mensaje y del prompt; la comprobación en código solo está verificada con los tests de respuestas
+fijadas, no con un modelo real. No hemos repetido t23 ni lanzado el banco completo.
+
+**Qué concluimos.** Con una ejecución, el mensaje de observación y la regla del prompt bastan para que `thinking`
+reconozca en t23 que la hoja no se generó, pasando de 0 de 7 a 1 de 1. Es un indicio y no una medición: el
+modelo varía entre ejecuciones (alrededor de ±3 tareas de 20 en el banco completo) y no sabemos con qué
+frecuencia acertaría. No podemos separar qué parte se debe al mensaje y cuál al prompt, ni decir nada de la
+comprobación en código con modelos reales, porque no ha llegado a dispararse. Lo que sí garantiza esa capa,
+y es la razón de mantenerla, es que si el modelo vuelve a afirmar la hoja, la respuesta sale corregida y
+marcada. Limitaciones: la comprobación solo conoce la hoja de preparación (el mapa `CLAIM_PATTERNS` tiene una
+entrada), y los patrones que detectan la mención ("hoja de preparación", "PDF", "la hoja") pueden dar falsos
+positivos en respuestas de otras tareas que no hemos medido. Falta repetir t23 tres veces, lanzar el banco
+completo para comprobar que ninguna tarea principal baja, y decidir en el #27 si la herramienta se permite o
+se mantiene bloqueada.

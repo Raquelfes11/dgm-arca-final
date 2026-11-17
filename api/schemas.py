@@ -146,3 +146,4 @@ class AgentResponse(BaseModel):
     succeeded: bool = True
     model: str = ""
     tokens_used: int = 0
+    warnings: list[str] = []  # safety flags, e.g. the answer claims an action that did not happen
