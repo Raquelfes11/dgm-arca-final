@@ -32,7 +32,7 @@ effects (the preparation sheet) are not executed unless --allow-side-effects is 
 benchmark only needs the first call, and this keeps it free of files. Run::
 
     uv run python -m tool_use.evaluate --bench tool_use/bench/cases.jsonl \\
-        --out reports/phase2_eval.json
+        --out reports/phase2/phase2_eval.json
 """
 
 from __future__ import annotations
@@ -512,7 +512,7 @@ def main() -> None:
     )
     parser.add_argument("--bench", default="tool_use/bench/cases.jsonl")
     parser.add_argument(
-        "--out", default=None, help="Output JSON (default: reports/phase2_eval.json)."
+        "--out", default=None, help="Output JSON (default: reports/phase2/phase2_eval.json)."
     )
     parser.add_argument(
         "--rescore",
@@ -595,7 +595,7 @@ def main() -> None:
 
     summary = build_summary(rows)
     print(json.dumps(summary, indent=2, ensure_ascii=False))
-    out = Path(args.out or "reports/phase2_eval.json")
+    out = Path(args.out or "reports/phase2/phase2_eval.json")
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(
         json.dumps(

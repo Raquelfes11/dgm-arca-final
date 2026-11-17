@@ -63,7 +63,7 @@ uv run pytest tests/test_agent_bench.py
 uv run python -m agent.evaluate --bench agent/bench/tasks.jsonl --brains base rlm thinking
 ```
 
-`evaluate` escribe `reports/phase4_eval.json`: por cerebro, tasa de éxito, pasos y tokens
+`evaluate` escribe `reports/phase4/phase4_eval.json`: por cerebro, tasa de éxito, pasos y tokens
 medios de las tareas principales, las mismas cifras de las de borde en `edge`, el desglose
 por `category` y cada fila con las herramientas que usó.
 
@@ -72,7 +72,7 @@ informe (éxito fiel, pasos sin llamada válida, respuestas vacías, uso de la b
 conocimiento, clases de fallo y resultado por tarea):
 
 ```bash
-uv run python -m agent.analyze_eval --markdown reports/phase4_analysis.md
+uv run python -m agent.analyze_eval --markdown reports/phase4/phase4_analysis.md
 ```
 
 `validate_bench` hay que pasarlo cada vez que se vuelva a descargar el corpus: CIMA actualiza

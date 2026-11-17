@@ -2,9 +2,9 @@
 """Scan phase1_eval.json for potential reward-hacking patterns.
 
 Usage:
-    python scan_hacking.py reports/phase1_eval.json
-    python scan_hacking.py reports/phase1_eval.json --section grpo_sin_kl --show 10
-    python scan_hacking.py reports/phase1_eval.json --reward-module rlm/rewards.py
+    python scan_hacking.py reports/phase1/phase1_eval.json
+    python scan_hacking.py reports/phase1/phase1_eval.json --section grpo_sin_kl --show 10
+    python scan_hacking.py reports/phase1/phase1_eval.json --reward-module rlm/rewards.py
 
 Checks per completion (all computed on the text inside the LAST <answer> block):
   multi_number  : more than one number inside <answer>  (exploits "last number" parsing)

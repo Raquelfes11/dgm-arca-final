@@ -1,8 +1,8 @@
-"""Read reports/phase4_eval.json and explain why each brain fails, not only how often.
+"""Read reports/phase4/phase4_eval.json and explain why each brain fails, not only how often.
 
     uv run python -m agent.analyze_eval
-    uv run python -m agent.analyze_eval --report reports/phase4_eval.json \\
-        --markdown reports/phase4_analysis.md
+    uv run python -m agent.analyze_eval --report reports/phase4/phase4_eval.json \\
+        --markdown reports/phase4/phase4_analysis.md
 
 The success rate of agent/evaluate.py is one number per brain. When it is low it does not
 say whether the model reasons badly, never calls a tool, writes calls the parser cannot read,
@@ -172,7 +172,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--report", default="reports/phase4_eval.json")
+    parser.add_argument("--report", default="reports/phase4/phase4_eval.json")
     parser.add_argument("--markdown", default=None, help="also write the tables to this file")
     parser.add_argument("--no-grid", action="store_true", help="omit the task by brain table")
     args = parser.parse_args()

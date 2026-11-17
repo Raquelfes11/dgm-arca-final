@@ -1,7 +1,7 @@
 """Phase 1, out-of-distribution test: how much do SFT and GRPO degrade on new problems?
 
 rlm.evaluate scores every model on rlm/data/test.jsonl (same families as train) and,
-run with --data rlm/data/test_ood.jsonl --out reports/phase1_eval_ood.json, on the OOD set
+run with --data rlm/data/test_ood.jsonl --out reports/phase1/phase1_eval_ood.json, on the OOD set
 (a family that never appears in train). This script reads both result files and answers:
 does the pass@1 of each model drop on the OOD set, and does it drop differently for SFT than
 for GRPO? It needs no GPU and no dataset, only the two JSON files.
@@ -10,7 +10,7 @@ Run::
 
     uv run python -m rlm.compare_ood --models sft grpo_sin_kl
 
-and it writes reports/ood_comparison.md (tables ready to paste in docs/EXPERIMENTS.md).
+and it writes reports/phase1/ood_comparison.md (tables ready to paste in docs/EXPERIMENTS.md).
 
 If the verifier has changed since rlm.evaluate ran (for example it learned a new unit), add
 --rescore: every stored generation is scored again with the current verifier, with no GPU
@@ -351,14 +351,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--test", default="reports/phase1_eval.json", help="rlm.evaluate on test")
+    parser.add_argument("--test", default="reports/phase1/phase1_eval.json", help="rlm.evaluate on test")
     parser.add_argument(
-        "--ood", default="reports/phase1_eval_ood.json", help="rlm.evaluate on test_ood"
+        "--ood", default="reports/phase1/phase1_eval_ood.json", help="rlm.evaluate on test_ood"
     )
     parser.add_argument(
         "--models", nargs="+", default=["sft", "grpo_sin_kl"], help="names used in --adapters"
     )
-    parser.add_argument("--out", default="reports/ood_comparison.md")
+    parser.add_argument("--out", default="reports/phase1/ood_comparison.md")
     parser.add_argument(
         "--rescore",
         action="store_true",
