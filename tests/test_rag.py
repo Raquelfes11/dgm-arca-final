@@ -45,6 +45,25 @@ def test_extract_citations_keeps_only_valid_ids_in_order():
     answer = "The axolotl regrows limbs [doc1-0001]. See also [doc1-0001] and [ghost-9999]."
     assert extract_citations(answer, {"doc1-0001", "doc1-0002"}) == ["doc1-0001"]
 
+def test_recursive_chunks_follow_sections_and_prepend_the_title_and_the_section():
+    pytest.importorskip("langchain_text_splitters")
+    doc = _doc(
+        "# Med X\n- dato\n\n"
+        "## 4.2 Posología\nDosis uno.\n\n"
+        "## 6.3 Validez\n24 horas."
+    )
+    chunks = recursive_chunks([doc])
+    headings = ["Med X", "Med X — 4.2 Posología", "Med X — 6.3 Validez"]
+    assert [c.heading for c in chunks] == headings
+    assert chunks[2].text == "Med X — 6.3 Validez\n24 horas."
+    assert [c.id for c in chunks] == ["d1-0000", "d1-0001", "d1-0002"]
+
+    plain = recursive_chunks([doc], by_section=False, add_headers=False)
+    assert len(plain) == 1  # the three sections fit in one chunk when structure is ignored
+    assert "24 horas." in plain[0].text
+
+    no_header = recursive_chunks([doc], add_headers=False)
+    assert no_header[2].text == "24 horas."
 
 def test_recursive_chunking_respects_size():
     pytest.importorskip("langchain_text_splitters")
@@ -169,28 +188,6 @@ def test_split_sentences_keeps_abbreviations_and_decimals_together():
 
 
 # --------------------------------------------------------------------------- recursive
-
-
-def test_recursive_chunks_follow_sections_and_prepend_the_header():
-    pytest.importorskip("langchain_text_splitters")
-    doc = _doc(
-        "# Med X\n- dato\n\n"
-        "## Med X — 4.2 Posología\nDosis uno.\n\n"
-        "## Med X — 6.3 Validez\n24 horas."
-    )
-    chunks = recursive_chunks([doc])
-    headings = ["Med X", "Med X — 4.2 Posología", "Med X — 6.3 Validez"]
-    assert [c.heading for c in chunks] == headings
-    assert chunks[2].text == "Med X — 6.3 Validez\n24 horas."
-    assert [c.id for c in chunks] == ["d1-0000", "d1-0001", "d1-0002"]
-
-    plain = recursive_chunks([doc], by_section=False, add_headers=False)
-    assert len(plain) == 1  # the three sections fit in one chunk when structure is ignored
-    assert "24 horas." in plain[0].text
-
-    no_header = recursive_chunks([doc], add_headers=False)
-    assert no_header[2].text == "24 horas."
-
 
 def test_recursive_chunks_count_the_header_in_the_size_limit():
     pytest.importorskip("langchain_text_splitters")

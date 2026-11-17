@@ -2295,8 +2295,7 @@ título de la ficha a cada chunk en `rag/chunking.py` y repetir `rag.evaluate`.
 **Qué queríamos saber.** Cuántas de las 20 tareas principales resuelve cada cerebro (`base`, `rlm`,
 `thinking`) y, si son pocas, por qué.
 
-**Qué hicimos.** Una ejecución por tarea y cerebro, sin repeticiones, con el agente tal como estaba en la
-rama `main`:
+**Qué hicimos.** Una ejecución por tarea y cerebro, sin repeticiones, con el agente tal como estaba en la rama `main`:
 
 ```
 export ARCA_RLM_ADAPTER=rlm/weights/final_rlm_lora_sin_kl
@@ -2733,6 +2732,172 @@ de una o dos tareas y no una medición. Lo que no se ha arreglado: t25 con `auto
 riesgo de que el modelo afirme cosas sobre herramientas que no ha usado (#03, #27). Los informes
 anteriores (`phase4_eval`, `fix01_*`) se hicieron con el comprobador viejo: sus tareas principales se
 pueden comparar, pero sus casos de borde no, salvo que se puntúen de nuevo con `agent.rescore`.
+
+---
+
+### 2026-11-16 · Proyecto final · #05 Inclusión del medicamento y la sección en los chunks
+
+**Qué queríamos saber.** Si anteponemos el nombre del medicamento y la sección del chunk a cada chunk, ¿mejorará el rendimiento del modelo gracias a que esté tiene más información?
+
+**Qué hicimos.** Modificamos el código en chunking.py para que se incluyese al inicio de cada chunk el nombre del medicamento y la sección en la que se encuentra el trozo de testo, como por ejemplo: `4.2 Posología`.
+
+Primero descargamos el corpus de la siguiente forma:
+```bash
+uv run python -m rag.download_corpus --from-manifest
+```
+
+Para determinar si el rendimiento del modelo mejoraba, ejecutamos el siguiente comando:
+```bash
+uv run python -m rag.evaluate --gold rag/gold/gold.jsonl --k 5 --out reports/rag/phase3_eval_exp5.json
+```
+
+Ejecutamos una segunda vez ese comando con chunk_size = 900 para compensar que hemos añadido texto adicional a cada chunk:
+
+```bash
+uv run python -m rag.evaluate --gold rag/gold/gold.jsonl --k 5 --out reports/rag/phase3_eval_exp5_chunk_size.json
+```
+
+**Qué pasó.** 
+
+Con chunk_size = 800 (resultados en `reports/rag/phase3_eval_exp5.json`):
+
+Todas las métricas son sobre las preguntas resueltas, las que tienen algún chunk que contiene su evidencia: 48 en recursivo y 47 en semántico. Barrido de λ del híbrido (peso de BM25; λ = 0 es el denso solo y λ = 1 es BM25 solo), con el mejor λ de cada chunking en negrita:
+
+| λ | 0.0 | 0.1 | 0.2 | 0.3 | 0.4 | 0.5 | 0.6 | 0.7 | 0.8 | 0.9 | 1.0 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Recursivo Recall@5 | 0.621 | 0.621 | 0.621 | **0.645** | 0.625 | 0.598 | 0.562 | 0.487 | 0.435 | 0.383 | 0.378 |
+| Recursivo MRR | 0.560 | 0.602 | 0.620 | 0.640 | **0.659** | 0.630 | 0.529 | 0.472 | 0.451 | 0.413 | 0.381 |
+| Semántico Recall@5 | **0.631** | 0.625 | 0.625 | 0.608 | 0.608 | 0.586 | 0.586 | 0.553 | 0.521 | 0.460 | 0.482 |
+| Semántico MRR | 0.624 | 0.631 | 0.668 | 0.668 | **0.670** | 0.667 | 0.575 | 0.533 | 0.495 | 0.457 | 0.460 |
+
+Con chunk_size = 900 (resultados en `reports/rag/phase3_eval_exp5_chunk_size.json`):
+
+| λ | 0.0 | 0.1 | 0.2 | 0.3 | 0.4 | 0.5 | 0.6 | 0.7 | 0.8 | 0.9 | 1.0 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Recursivo Recall@5 | 0.626 | 0.626 | **0.646** | 0.635 | 0.600 | 0.603 | 0.593 | 0.535 | 0.485 | 0.465 | 0.415 |
+| Recursivo MRR | 0.612 | 0.631 | 0.648 | 0.658 | **0.690** | 0.658 | 0.581 | 0.531 | 0.486 | 0.466 | 0.438 |
+| Semántico Recall@5 | **0.631** | 0.625 | 0.625 | 0.608 | 0.608 | 0.586 | 0.586 | 0.553 | 0.521 | 0.460 | 0.482 |
+| Semántico MRR | 0.624 | 0.631 | 0.668 | 0.668 | **0.670** | 0.667 | 0.575 | 0.533 | 0.495 | 0.457 | 0.460 |
+
+Resultados de cada retriever, con el híbrido en λ = 0.5 y en el mejor λ:
+
+| Chunking | Chunks | Media | Sin resolver | BM25 Recall@5 / MRR | Dense Recall@5 / MRR | Hybrid λ=0.5 Recall@5 / MRR | Mejor λ | Hybrid mejor λ Recall@5 / MRR |
+|---|---|---|---|---|---|---|---|---|
+| Recursivo (sin header) | 2626 | 556 | 2 (14, 44) | 0.424 / 0.394 | 0.642 / 0.568 | 0.611 / 0.616 | 0.4 | **0.642 / 0.632** |
+| Semántico 0.75 (sin header) | 2406 | 585 | 3 (5, 7, 10) | 0.475 / 0.417 | 0.578 / 0.603 | 0.605 / 0.630 | 0.3 | 0.583 / **0.647** |
+| Recursivo (con header) | 2852 | 579.408 | 2 (14, 44) | 0.378 / 0.381 | 0.621 / 0.560 | 0.598 / 0.630 | 0.4 | 0.625 / **0.659** |
+| Semántico 0.75 (con header) | 2442 | 635.965 | 3 (5, 7, 10) | 0.482 / 0.460 | 0.631 / 0.624 | 0.586 / 0.667 | 0.4 | 0.608 / **0.670** |
+| Recursivo (header, chunk_size 900) | 2493 | 644 | 0 | 0.415 / 0.438 | 0.626 / 0.612 | 0.603 / 0.658 | 0.4 | 0.600 / **0.690** |
+
+Como podemos observar, el número de chunks aumenta en esta nueva versión si no aumentamos el tamaño de chunk sizes ya que incluimos los headers con el nombre del medicamento y la sección el inicio de cada chunk.
+
+Las preguntas sin resolver son las mismas salvo al aumentar el chunk_size debido a que la estrategia de chunking no puede devolver fragmentos de texto tan largos como los que se encuentran en el gold set para esas preguntas.
+
+**Qué concluimos.** La nueva versión con chunk_size aumentado mejora el MRR de los modelos. Aunque disminuye el Recall@5, sigue siendo un valor relevante (0.600) y para este caso se resuelven todas las preguntas. Por lo tanto, decidimos cambiar al chunking recursivo e híbrido con λ = 0.4, modificamos los chunks para que estos incluyan los headers y aumentamos el chunk_size a 900. pero antes, comprobamos si mejoran los resultados del agente.
+
+---
+
+### 2026-11-16 · Proyecto final · #05 Mejora del agente tras chunks con heading
+
+**Qué queríamos saber.** Queremos saber si el agente mejora al incorporar al inicio de los chunks el nombre del medicamento y la sección de la que sale el trozo de texto del chunk.
+
+**Qué hicimos.** Para saber si el cambio mejoraba el agente ejecutamos el siguiente comando:
+
+```
+uv run python -m agent.evaluate --bench agent/bench/tasks.jsonl --brains base rlm thinking --out reports/agent/phase4_eval_exp5.json
+```
+
+Y para obtener más información sobre los resultados y dónde ha fallado el modelo ejecutamos este comando:
+
+```
+uv run python -m agent.analyze_eval --report reports/agent/phase4_eval_exp5.json
+```
+
+**Qué pasó.** Recuperando los resultados del dichero `reports/agents/phase4_eval_exp5.json`, construimos la siguiente tabla escribiendo entre paréntesis, el valor de la evaluación llevada a cabo el 2026-11-11:
+
+| | base | rlm | thinking |
+|---|---|---|---|
+| Éxito, 20 tareas principales | 4/20 (1) | 5/20 (1) | 9/20 (5) |
+| Éxito fiel | 0/20 (0) | 0/20 (0) | 3/20 (1) |
+| Casos de borde acertados | 0/5 (0) | 1/5 (0) | 2/5 (2) |
+| Llegan a `final_answer` | 19/20 (14) | 18/20 (19) | 16/20 (18) |
+| Respuestas vacías | 0/20 (0) | 0/20 (0) | 0/20 (0) |
+| Pasos sin llamada válida | 1/31 (3/63) | 6/24 (5/27) | 11/37 (11/60) |
+| Busca él mismo en la base de conocimiento (si la necesita) | 0/18 (0 %) | 0/18 (0 %) | 2/18 (11 %) |
+| Con búsqueda automática previa | 20/20 (100 %) | 20/20 (100 %) | 20/20 (100 %) |
+| Pasos medios · tokens medios | 1,55 · 5454,5 | 1,2 · 4787,2 | 1,85 · 7566 |
+
+Por clase de fallo, en las 20 tareas principales:
+
+| Clase de fallo | base | rlm | thinking |
+|---|---|---|---|
+| No llega a dar una respuesta (se agotan los pasos o no hay llamada válida) | 1/20 (5 %) | 2/20 (10 %) | 4/20 (20 %) |
+| Llama a final_answer pero sin respuesta | 0/20 (0 %) | 0/20 (0 %) | 0/20 (0 %) |
+| Responde sin usar las herramientas necesarias | 15/20 (75 %) | 13/20 (65 %) | 6/20 (30 %) |
+| Usa las herramientas necesarias pero el resultado es incorrecto | 0/20 (0 %) | 0/20 (0 %) | 1/20 (5 %) |
+
+Comparándolo con el análisis realizado el 16/11/2026 con la mejora 4 tenemos la siguiente comparación:
+| | automática | thinking |
+|---|---|---|
+| Éxito, 20 tareas principales | 9/20 (45 %) | 9/20 (45 %) |
+| Éxito fiel | 1/20 (5 %) | 3/20 (15 %) |
+| Casos de borde acertados | 1/5 (20 %) | 2/5 (40 %) |
+| Llegan a `final_answer` | 19/20 (95 %) | 16/20 (80 %) |
+| Pasos sin llamada válida | 9/39 (23 %) | 11/37 (30 %) |
+| Busca él mismo en la base | 5/18 (28 %) | 2/18 (11 %) |
+| Pasos medios · tokens medios | 1,9 · 8.252 | 1,85 · 7566 |
+
+
+**Segunda medición: con el filtro del #06 y tres ejecuciones.** La medición de arriba es de una sola
+ejecución y se hizo antes del filtro del #06, porque la rama salió de `main` antes de mergearlo. Tras traer
+`main` a la rama y volver a pasar los tests, repetimos la comparación que usamos en el #06: `thinking` en
+`auto`, con el filtro y los chunks nuevos, tres ejecuciones (`reports/fix05_auto_a.json`, `_b` y `_c`),
+frente a las tres del #06 con los chunks de antes. La recuperación se mide con
+`agent.validate_bench --retrieval`.
+
+| | #06 (chunks de antes) | #05 + #06 (chunks con cabecera, 900) |
+|---|---|---|
+| Tareas principales con toda la evidencia en el top 5 | 10/20 | 11/20 |
+| Pasajes con evidencia | 20/33 | 21/33 |
+| Éxito `auto` (de 20) | 12, 10, 10 (media 10,7) | 14, 12, 10 (media 12,0) |
+| Éxito fiel `auto` (de 20) | 5, 5, 3 (media 4,3) | 6, 5, 3 (media 4,7) |
+| Casos de borde `auto` (de 5) | 3, 2, 3 | 2, 2, 3 |
+| Pasos sin llamada válida por ejecución | 8, 8, 10 | 8, 5, 10 |
+
+Por tarea, de las tres ejecuciones de cada brazo:
+
+- **Mejoran:** t09 (de 0/3 a 3/3: el pasaje con la dosis máxima de tobramicina ya entra en el top 5),
+  t13 (de 0/3 a 2/3, recupera lo que había perdido con el filtro) y, una vez de tres, t10 y t20.
+- **Empeoran:** t04 (de 2/3 a 0/3: llama a `dose_calculator` pero en las tres ejecuciones responde 0,08 mL
+  en vez de 0,8 mL) y t16 (de 3/3 a 1/3). No hemos investigado si es un efecto de los chunks nuevos o del
+  modelo.
+- **Igual:** t01, t07, t14, t15 y t18 aciertan en todas, y t11, t12 y t19 fallan en todas. t10, t11,
+  t15 y t17 siguen sin la evidencia en el top 5, y t20 sigue en 2/6 pasajes.
+
+**Qué concluimos.**
+
+1. *La cabecera con el título y la sección no empeora la recuperación y la mejora un poco:* 11/20 tareas con
+   toda la evidencia frente a 10/20, y 21/33 pasajes frente a 20/33. Con el `chunk_size` en 900 se resuelven
+   todas las preguntas del gold, y el MRR sube (0,632 a 0,690) a costa de algo de Recall@5 (0,642 a 0,600).
+2. *En el agente no se puede afirmar una mejora.* Con una sola ejecución (9/20 frente a 9/20, medición de
+   arriba) no había base, y con tres el éxito pasa de 10,7 a 12,0 y el éxito fiel de 4,3 a 4,7 con los
+   rangos solapados (10-14 frente a 10-12, y 3-6 frente a 3-5), dentro del ruido entre ejecuciones. Lo
+   que sí se ve son tareas concretas que cambian de sentido: t09 y t13 mejoran, t04 y t16 empeoran.
+3. *Se han cambiado dos cosas a la vez* (la cabecera y el `chunk_size` de 800 a 900), así que no sabemos
+   cuánto aporta cada una.
+4. *No se ha entrenado ningún modelo nuevo.* En la primera tabla se compara el mismo modelo con chunks
+   distintos, no un modelo "entrenado con los nuevos chunks". Y en esa primera medición, `thinking` deja
+   de llegar a `final_answer` en 3 tareas más que con `auto` del #04 (16/20 frente a 19/20), sin que
+   sepamos si es ruido.
+5. *Sigue sin resolverse el ranking dentro de la ficha* para t10, t11, t15 y t17: la cabecera no lo
+   arregla. Hacen falta más pasajes o un reranker.
+
+**Decisiones y siguientes pasos.** Se acepta el cambio (cabecera con título y sección, y `chunk_size` 900),
+porque cumple lo que nos pusimos como condición: la recuperación no baja de 10/20 y el agente queda
+dentro del rango del #06. El índice denso se rehace solo la primera vez que se usan los chunks nuevos (lleva
+una huella de los chunks). A probar después: separar el efecto de la cabecera y el del `chunk_size`;
+arreglar el efecto del filtro sobre el orden dentro de la ficha (#06); más pasajes o un reranker para
+t10, t11, t15 y t17; y repetir las comparaciones con repeticiones (#11).
 
 ---
 

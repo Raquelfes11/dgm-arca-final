@@ -13,11 +13,13 @@ switched off for an ablation:
 
 * by_section: never let a chunk cross a Markdown heading. Without it a chunk can mix the
   end of one section ("6.3 Periodo de validez") with the start of the next one.
-* add_headers: prepend the heading of the section (MEDICAMENTO — 4.2 Posología) to
-  every chunk. A chunk from the middle of a section does not say which medicine it talks
-  about, and neither BM25 nor the embedding model can guess it; the header fixes that. The
-  original text stays contiguous inside the chunk, so a verbatim passage copied from the
-  corpus is still found by plain substring search.
+* add_headers: prepend the title of the data sheet and the heading of the section
+  (CEFTRIAXONA NORMON 1 g POLVO PARA SOLUCIÓN INYECTABLE — 4.2 Posología) to every chunk.
+  A chunk from the middle of a section does not say which medicine it talks about, and
+  neither BM25 nor the embedding model can guess it; the header fixes that. The title is
+  the one of the data sheet in the corpus (the "# ..." line), not the active ingredient.
+  The original text stays contiguous inside the chunk, so a verbatim passage copied from
+  the corpus is still found by plain substring search.
 
 Compare both strategies with rag/evaluate.py (number of chunks, average length and
 Recall@k on your gold set). To choose the semantic threshold, run::
@@ -47,6 +49,7 @@ EmbedFn = Callable[[list[str]], np.ndarray]
 RECURSIVE_SEPARATORS = ("\n\n", "\n", r"(?<=[.!?])\s+", " ", "")
 
 _HEADING = re.compile(r"^#{1,6}[ \t]+(.+?)[ \t#]*$")
+_TITLE = re.compile(r"^#[ \t]+(.+?)[ \t#]*$", re.MULTILINE)  # solo el H1
 # A sentence ends at . ! ? followed by a capital letter (or an opening mark). Requiring the
 # capital keeps "p. ej.", "máx. 5 mg" and "0,9 %" in one piece.
 _SENTENCE_END = re.compile(r"(?<=[.!?])[ \t]+(?=[A-ZÁÉÍÓÚÜÑ¿¡\"“«(\[])")
@@ -89,10 +92,23 @@ def split_sections(text: str) -> list[tuple[str, str]]:
             sections.append((head, body))
     return sections
 
+def doc_title(text: str) -> str:
+    """Título de la ficha: primer encabezado de nivel 1 ('# NOMBRE DEL MEDICAMENTO')."""
+    match = _TITLE.search(text)
+    return match.group(1).strip() if match else ""
+
+
+def _full_heading(title: str, heading: str) -> str:
+    """'TÍTULO — 4.2 Posología'. Sin título, sin sección o si son iguales, no duplica."""
+    if not title or not heading or heading == title:
+        return heading
+    return f"{title} — {heading}"
+
 
 def _sections(doc: Document, by_section: bool) -> list[tuple[str, str]]:
     if by_section:
-        return split_sections(doc.text)
+        title = doc_title(doc.text)
+        return [(_full_heading(title, head), body) for head, body in split_sections(doc.text)]
     body = doc.text.strip()
     return [("", body)] if body else []
 
@@ -113,7 +129,7 @@ def _budget(size: int, heading: str, add_headers: bool) -> int:
 
 def recursive_chunks(
     documents: list[Document],
-    chunk_size: int = 800,
+    chunk_size: int = 900,
     chunk_overlap: int = 100,
     separators: tuple[str, ...] = RECURSIVE_SEPARATORS,
     by_section: bool = True,
@@ -123,6 +139,8 @@ def recursive_chunks(
 
     separators are regular expressions tried in order. chunk_size counts the header
     too (when there is one, the body gets what is left).
+
+    chunk_size counts the header too (title + section)
     """
     from langchain_text_splitters import RecursiveCharacterTextSplitter
 
