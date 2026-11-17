@@ -392,10 +392,12 @@ class ReActAgent:
             if raw.count("<tool_call>") > raw.count("</tool_call>"):
                 raw += "\n</tool_call>"  # small models sometimes stop before closing the tag
             parsed = parse_tool_calls(raw)
+            route = "tag"  # how the call was read, kept in the step to measure the format
             if not parsed.has_tool_calls:
                 fallback = _action_line_fallback(raw, self.registry.tools)
                 if fallback is not None:
                     parsed.tool_calls = [fallback]
+                    route = "fallback"
             thought = parsed.thinking or parsed.text
             problem = None  # why this step cannot be run, if it cannot
             if parsed.has_tool_calls:
@@ -433,7 +435,7 @@ class ReActAgent:
             call = parsed.tool_calls[0]
             action = AgentAction(name=call.name, arguments=call.arguments)
             if call.name == "final_answer":
-                self.steps.append(AgentStep(thought=thought, action=action))
+                self.steps.append(AgentStep(thought=thought, action=action, call_route=route))
                 return AgentResponse(
                     final_answer=_answer_text(call.arguments),
                     steps=self.steps, 
@@ -444,7 +446,9 @@ class ReActAgent:
             if seen[key] >= MAX_REPEATED_CALLS:
                 # the model keeps asking for the same thing: stop instead of burning all the steps
                 message = f"Loop detected: '{call.name}' was called {seen[key]} times with the same arguments."
-                self.steps.append(AgentStep(thought=thought, action=action, observation=message))
+                self.steps.append(
+                    AgentStep(thought=thought, action=action, observation=message, call_route=route)
+                )
                 return AgentResponse(final_answer="", steps=self.steps, n_steps=step + 1, succeeded=False)
             record = self._call_tool(call.name, call.arguments)
             observation = str(record.result if record.ok else record.error)
@@ -458,7 +462,8 @@ class ReActAgent:
                 action=AgentAction(
                     name=call.name, arguments=call.arguments
                 ), 
-                observation=observation)
+                observation=observation,
+                call_route=route)
             self.steps.append(step_record)
             memory.add("assistant", raw); memory.add("tool", observation, name=call.name)
             memory.compress(lambda old: self.summarize(old, brain))
