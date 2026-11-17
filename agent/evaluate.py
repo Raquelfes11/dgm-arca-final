@@ -151,7 +151,7 @@ def main() -> None:
         action="store_true",
         help="leave out CIMA, convert_units, dose_calculator and the sheet tool",
     )
-    parser.add_argument("--few-shot", type=bool, default=False)
+    parser.add_argument("--few-shot", type=bool, default=True)
     args = parser.parse_args()
 
     from dotenv import load_dotenv

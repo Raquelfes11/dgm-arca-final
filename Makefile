@@ -10,6 +10,7 @@ UV ?= uv
 BRAINS ?= thinking
 RAG_MODE ?= auto
 MAX_STEPS ?= 10
+FEW_SHOT ?= True
 BENCH_OUT = reports/fix/$(FIX)/fix$(FIX)_$(LABEL)
 
 help: ## Muestra esta ayuda
@@ -47,11 +48,11 @@ smoke-dry: ## Prueba de instalación en CPU con un modelo diminuto (~1 min)
 bench-check: ## Valida el banco (estructura, aritmetica, evidencias); RETRIEVAL=1 mira tambien el retriever
 	$(UV) run python -m agent.validate_bench $(if $(RETRIEVAL),--retrieval)
 
-bench: ## Valida, evalua y analiza: make bench FIX=09 LABEL=auto_a [BRAINS="base rlm thinking"] [RAG_MODE=tool] [NO_TOOLS=1] [IDS="t01 t02"] [FORCE=1]
+bench: ## Valida, evalua y analiza: make bench FIX=09 LABEL=auto_a [BRAINS="base rlm thinking"] [RAG_MODE=tool] [NO_TOOLS=1] [IDS="t01 t02"] [FORCE=1] [FEW_SHOT=True]
 	$(if $(and $(FIX),$(LABEL)),,$(error Falta FIX o LABEL. Ejemplo: make bench FIX=09 LABEL=auto_a))
 	$(if $(and $(wildcard $(BENCH_OUT).json),$(if $(FORCE),,1)),$(error Ya existe $(BENCH_OUT).json. Elige otro LABEL o usa FORCE=1))
 	$(MAKE) bench-check
-	$(UV) run python -m agent.evaluate --brains $(BRAINS) --rag-mode $(RAG_MODE) --max-steps $(MAX_STEPS) --out $(BENCH_OUT).json $(if $(IDS),--ids $(IDS)) $(if $(NO_TOOLS),--no-tools)
+	$(UV) run python -m agent.evaluate --brains $(BRAINS) --rag-mode $(RAG_MODE) --max-steps $(MAX_STEPS) --few-shot $(FEW_SHOT) --out $(BENCH_OUT).json $(if $(IDS),--ids $(IDS)) $(if $(NO_TOOLS),--no-tools)
 	$(UV) run python -m agent.analyze_eval --report $(BENCH_OUT).json --markdown $(BENCH_OUT).md
 	@echo "Informe guardado en $(BENCH_OUT).json y $(BENCH_OUT).md"
 
