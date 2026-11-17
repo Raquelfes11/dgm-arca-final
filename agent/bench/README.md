@@ -63,7 +63,24 @@ uv run pytest tests/test_agent_bench.py
 uv run python -m agent.evaluate --bench agent/bench/tasks.jsonl --brains base rlm thinking
 ```
 
-`evaluate` escribe `reports/phase4/phase4_eval.json`: por cerebro, tasa de éxito, pasos y tokens
+Para repetir la evaluación sin acordarse de los tres pasos hay un atajo, `make bench`. Valida el
+banco, evalúa y saca las tablas, y guarda cada ejecución con su propio nombre en
+`reports/fix/NN/fixNN_<etiqueta>.json` (y el `.md` con las tablas al lado). Así nunca pisa la
+línea base de la fase 4. Si el fichero ya existe se niega a sobrescribirlo, salvo con `FORCE=1`.
+
+```bash
+make bench FIX=09 LABEL=auto_a                              # cerebro thinking, rag_mode auto
+make bench FIX=09 LABEL=auto_b BRAINS="base rlm thinking"   # varios cerebros
+make bench FIX=09 LABEL=sin_filtro ARCA_DRUG_FILTER=0       # las variables ARCA_* se pasan igual
+make bench FIX=09 LABEL=sin_kb RAG_MODE=off NO_TOOLS=1 IDS="t01 t02"
+make bench-check RETRIEVAL=1                                # solo validar, mirando también el retriever
+```
+
+Variables: `FIX` (número del cambio o nombre de la carpeta, obligatorio), `LABEL` (obligatorio),
+`BRAINS` (por defecto `thinking`), `RAG_MODE` (`auto`), `MAX_STEPS` (10), `IDS`, `NO_TOOLS`,
+`FORCE`. Con `make` sin argumentos sale la lista.
+
+Sin `--out`, `evaluate` escribe `reports/phase4/phase4_eval.json` (la línea base): por cerebro, tasa de éxito, pasos y tokens
 medios de las tareas principales, las mismas cifras de las de borde en `edge`, el desglose
 por `category` y cada fila con las herramientas que usó.
 

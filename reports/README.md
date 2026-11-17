@@ -14,5 +14,6 @@ métricas de cada tarea. Las entradas de `docs/EXPERIMENTS.md` citan estos fiche
   número propio en la lista.
 - `rag/`, `rlm/`: informes de la fase 3 y de los adaptadores de la fase 1.
 
-Para un cambio nuevo, ponle a la ejecución la carpeta en la ruta de salida, por ejemplo
-`--out reports/fix/09/auto_a.json`. `agent.evaluate` crea la carpeta si no existe.
+Para un cambio nuevo, lanza `make bench FIX=09 LABEL=auto_a`: guarda `reports/fix/09/fix09_auto_a.json`
+y el `.md` con las tablas, y se niega a sobrescribir un informe que ya existe. Si usas
+`agent.evaluate` a mano, ponle la carpeta en `--out`; crea la carpeta si no existe.
