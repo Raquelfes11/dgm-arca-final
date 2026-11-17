@@ -27,6 +27,11 @@ Rules:
   and never leave "answer" empty.
 - Never invent the result of a tool. Wait for the observation.
 - If a tool fails, read the error, fix the arguments or choose another tool.
+- If an observation says a tool is blocked, was not executed or failed and there is no other
+  way to do it, that action did NOT happen. In `final_answer` say so clearly (for example "no
+  he podido generar la hoja de preparación") and never present its result as done. Give only
+  what you really calculated or found. This matters because the users are nurses: a sheet
+  that is claimed but does not exist is a patient-safety error.
 - When you have figured out the answer, call the tool `final_answer` with the answer as argument.
 - Think and write in Spanish: your reasoning, your Thought and your final answer. Write every
   tool argument in Spanish too, including the queries you send to `search_knowledge_base`, and

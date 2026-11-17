@@ -42,6 +42,60 @@ RAG_MODES = ("auto", "tool", "off")  # how the knowledge base reaches the model,
 AUTO_SEARCH_TOP_K = 5  # passages of the automatic search made before the first step
 MIN_TOP_K = 3  # small models ask for top_k=1 and the passage they need is not the first one
 
+def _not_done_message(name: str, reason: str) -> str:
+    """Observation for a tool that did not produce its result. It says in capitals that
+    nothing was done, because a small model reads a plain error as a pending step and then
+    claims the result anyway (t23: the model said the sheet was generated)."""
+    return (
+        f"HERRAMIENTA NO EJECUTADA: '{name}' {reason}. "
+        f"NO se ha generado ningún resultado ni archivo con '{name}'. "
+        "En tu respuesta final di claramente que esa acción NO se ha realizado y no la "
+        "presentes como hecha. Entrega solo lo que sí has calculado o consultado."
+    )
+
+
+# Tools whose result a final answer can claim. name -> (pattern that shows the answer talks about
+# that result, how to call it in the warning). The pattern is narrow on purpose: a bare "ficha"
+# would also match "ficha técnica" in RAG answers. Generous enough to catch "hoja", "PDF".
+CLAIM_PATTERNS: dict[str, tuple[re.Pattern, str]] = {
+    "create_preparation_sheet": (
+        re.compile(r"hoja de preparaci|ficha de preparaci|\bPDF\b|\bla hoja\b", re.IGNORECASE),
+        "la hoja de preparación",
+    ),
+}
+# The answer already says the action did not happen (blocked, could not, needs confirmation).
+ACKNOWLEDGES_PATTERN = re.compile(
+    r"\bno\s+(?:se\s+)?(?:ha\s+|he\s+|han\s+|hemos\s+)?(?:podido|pudo|puedo|puede|es\s+posible|"
+    r"generad|cread|realizad|ejecutad|disponible)"
+    r"|\bno\s+(?:genero|creo|genera|crea)\b|bloquead|requiere\s+confirmaci|sin\s+confirmaci"
+    r"|necesita\s+confirmaci|pendiente\s+de\s+confirmaci",
+    re.IGNORECASE,
+)
+
+
+def check_claimed_actions(answer: str, done_tools: set[str]) -> tuple[str, list[str]]:
+    """Flag a final answer that presents a tool result as done when the tool did not succeed.
+
+    Returns the answer (with a warning line in front if it needed one) and the warnings.
+    In a clinical setting a claimed preparation sheet that does not exist is a safety error,
+    so the text itself is corrected and not only the metadata (nobody may read the metadata).
+    """
+    if ACKNOWLEDGES_PATTERN.search(answer):
+        return answer, []  # it says it did not happen: that is the honest answer
+    warnings_found: list[str] = []
+    labels: list[str] = []
+    for tool_name, (pattern, label) in CLAIM_PATTERNS.items():
+        if tool_name in done_tools or not pattern.search(answer):
+            continue
+        warnings_found.append(
+            f"La respuesta menciona {label}, pero '{tool_name}' no se ejecutó con éxito."
+        )
+        labels.append(label)
+    if labels:
+        answer = f"AVISO: {' y '.join(labels)} NO se ha generado: la herramienta está bloqueada o ha fallado (requiere confirmación del usuario). " + answer
+    return answer, warnings_found
+
+
 ACTION_PATTERN = re.compile(r"Action:\s*`?(?P<name>[A-Za-z_]\w*)`?")
 ACTION_JSON_PATTERN = re.compile(r"Action:\s*(?=\{)")  # Action: {"name": ..., "arguments": {...}}
 
@@ -291,8 +345,9 @@ class ReActAgent:
                 name=name,
                 arguments=arguments,
                 ok=False,
-                error=f"tool '{name}' requires user confirmation and cannot run here. "
-                "Use another tool or explain what you would do in final_answer.",
+                error=_not_done_message(
+                    name, "está BLOQUEADA: requiere confirmación del usuario y aquí no se puede ejecutar"
+                ),
                 requires_confirmation=True,
             )
         box: list[ToolCallRecord] = []
@@ -306,7 +361,7 @@ class ReActAgent:
                 name=name,
                 arguments=arguments,
                 ok=False,
-                error=f"tool '{name}' timed out after {TOOL_TIMEOUT_S}s. Try another approach.",
+                error=_not_done_message(name, f"ha superado el tiempo límite ({TOOL_TIMEOUT_S}s)"),
                 latency_ms=1000 * TOOL_TIMEOUT_S,
             )
         return box[0]
@@ -387,6 +442,7 @@ class ReActAgent:
             self._auto_search(task, memory)
         nudged = False  # True after we already asked the model once to fix its format
         seen: dict[tuple[str, str], int] = {}  # (tool, arguments) -> times called
+        done_tools: set[str] = set()  # tools that returned ok=True: only these results are real
         for step in range(max_steps):
             raw = self.generate(memory.render(), brain)
             if raw.count("<tool_call>") > raw.count("</tool_call>"):
@@ -434,10 +490,12 @@ class ReActAgent:
             action = AgentAction(name=call.name, arguments=call.arguments)
             if call.name == "final_answer":
                 self.steps.append(AgentStep(thought=thought, action=action))
+                answer, flags = check_claimed_actions(_answer_text(call.arguments), done_tools)
                 return AgentResponse(
-                    final_answer=_answer_text(call.arguments),
-                    steps=self.steps, 
+                    final_answer=answer,
+                    steps=self.steps,
                     n_steps=step + 1,
+                    warnings=flags,
                 )
             key = (call.name, json.dumps(call.arguments, sort_keys=True, default=str))
             seen[key] = seen.get(key, 0) + 1
@@ -447,7 +505,9 @@ class ReActAgent:
                 self.steps.append(AgentStep(thought=thought, action=action, observation=message))
                 return AgentResponse(final_answer="", steps=self.steps, n_steps=step + 1, succeeded=False)
             record = self._call_tool(call.name, call.arguments)
-            observation = str(record.result if record.ok else record.error)
+            if record.ok:
+                done_tools.add(call.name)
+            observation =str(record.result if record.ok else record.error)
             if seen[key] == 2:  # second identical call: run it, but warn the model
                 observation += (
                     "\n[Warning: you already made this exact call and the result will not "
