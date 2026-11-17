@@ -421,7 +421,7 @@ def main() -> None:
     )
     parser.add_argument("--gold", default="rag/gold/example_gold.jsonl")
     parser.add_argument("--k", type=int, default=5)
-    parser.add_argument("--out", default="reports/phase3_eval.json")
+    parser.add_argument("--out", default="reports/phase3/phase3_eval.json")
     parser.add_argument("--corpus", default="rag/corpus")
     parser.add_argument("--index-dir", default="rag/index")
     parser.add_argument("--threshold", type=float, default=0.75, help="semantic chunking")
@@ -441,7 +441,7 @@ def main() -> None:
     parser.add_argument(
         "--instruction-chunking", choices=["recursive", "semantic"], default="recursive"
     )
-    parser.add_argument("--instruction-out", default="reports/phase3_instruction_sweep.json")
+    parser.add_argument("--instruction-out", default="reports/phase3/phase3_instruction_sweep.json")
     args = parser.parse_args()
     gold = load_gold(args.gold)
     print(f"{len(gold)} gold questions loaded; results will go to {args.out}")

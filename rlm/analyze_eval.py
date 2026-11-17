@@ -3,7 +3,7 @@ from collections import Counter, defaultdict
 from rlm.data import load_domain_dataset
 from rlm.verifier import MedicationVerifier
 
-res = json.load(open("reports/phase1_eval.json"))
+res = json.load(open("reports/phase1/phase1_eval.json"))
 ds = load_domain_dataset("rlm/data/test.jsonl")
 meta = {ex["prompt"][-1]["content"]: ex for ex in ds}
 mv = MedicationVerifier()
