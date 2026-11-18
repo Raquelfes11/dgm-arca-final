@@ -3188,3 +3188,17 @@ uv run python -m agent.rescore --report reports/fix/few_shot/fixfew_shot__eval.j
 **Qué concluimos.** Como se puede observar, el agente con el brain `thinking` obtiene un caso de éxito "falso". Es por eso que concluimos que hacer que la evaluación sea más estricta es necesaria para detectar casos que parecen correctos si no se revisan y para exigir también al agente que devuelva las unidades de la respuesta.
 
 ---
+
+### 2026-11-18 · Proyecto final · Uso de herramientas con requires_confirmation=True
+
+**Qué queríamos saber.** Hasta ahora el agente recibía un mensaje de error cuando intentaba usar las herramientas con requires_confirmation=True, 
+en nuestro caso solo la de create_preparation_sheet() porque queríamos que el agente mandara un mensaje al usuario en el que le permitiera dar una 
+respuesta de confirmación de si quería la sheet o no. Sin embargo, luego pensándolo nos dimos cuenta de que esto a través de la API no iba a ser posible ya que solo podemos hacer peticiones individuales. Además, no tenía mucho sentido porque si el usuario quería la sheet lo especificaría en el primer mensaje al agente y si no lo quería no tenía sentido que el agente le preguntara al usuario si la quería. Por ello, queríamos que el agente llamara a create_preparation_sheet() con libertad siempre que el usuario se lo hubiera pedido en el mensaje. Había veces que el agente llamaba a la herramienta sin que el usuario lo hubiera pedido explícitamente, así que en esos casos queríamos que el agente recibiera una notificación recordándole que no podía usar esa herramienta.
+
+**Qué hicimos.** Cambiamos cuándo se deja ejecutar create_preparation_sheet cuando el modelo la llama. La herramienta la sigue llamando el modelo, pero antes de ejecutarla el agente comprueba con requested_tools(task) si el mensaje del usuario la pedía ("genera la hoja de preparación", "hazme el PDF", "necesito una hoja..."), ignorando las peticiones negadas ("sin hoja", "no quiero la hoja"). Si el usuario la pedía, la llamada se ejecuta. Si no la pedía, la llamada se bloquea: no se escribe ningún PDF y el modelo recibe una observación que le dice que la acción no se ha realizado.
+
+**Qué pasó.** Tras ejecutar algunas pruebas a través de la API hemos comprobado que el agente genera correctamente la preparation sheet cuando se le pide y no la genera cuando le decimos que no la queremos o cuando directamente no la mencionamos.
+
+**Qué concluimos.** Los cambios introducidos permiten que se ejecute la tool de create_preparation_sheet() que llevaba desde la fase 2 sin poder ejecutarse. Durante las pruebas hemos visto que hay casos en los que hay que llamar a herramientas y el agente no lo hace, pero eso no es la primera vez que ocurre y no era el objetivo de esta implementación.
+
+---
