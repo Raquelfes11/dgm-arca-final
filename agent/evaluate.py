@@ -23,6 +23,34 @@ from pathlib import Path
 # A number as written in Spanish or English: 7, 7.5, 7,5, 1.050, 1,050.5, 1.050,5, 8.400.000.
 # It must not be glued to a letter on the left, so "2-8" gives 2 and 8 and "B12" gives nothing.
 _NUMBER = re.compile(r"(?<![\w])-?\d+(?:[.,]\d+)*")
+_CITATION = re.compile(r"\[[^\]]*\]")
+
+UNIT_ALIASES = {
+    "mL": {"ml", "milliliter", "milliliters", "millilitre", "millilitres",
+           "mililitro", "mililitros", "cc"},
+    "L": {"l", "liter", "liters", "litre", "litres", "litro", "litros"},
+    "mg": {"mg", "milligram", "milligrams", "milligramo", "miligramo", "miligramos"},
+    "g": {"g", "gram", "grams", "gramo", "gramos"},
+    "mcg": {"mcg", "µg", "ug", "microgram", "micrograms", "microgramo", "microgramos"},
+    "kg": {"kg", "kilogram", "kilograms", "kilogramo", "kilogramos"},
+    "min": {"min", "mins", "minute", "minutes", "minuto", "minutos"},
+    "h": {"h", "hr", "hrs", "hour", "hours", "hora", "horas"},
+    "gotas": {"drop", "drops", "gota", "gotas", "gtt"},
+    "gotas/min": {"gotas/min", "gotas/minuto", "gotas/minutos", "gotas por min",
+                  "gotas por minuto", "gtt/min", "gtt/minuto", "drops/min", "drops/minute",
+                  "drops per minute"},
+    "mL/h": {"ml/h", "ml/hr", "ml/hora", "ml/horas", "ml por hora", "ml/hour", "ml per hour"},
+    "mL/min": {"ml/min", "ml/minuto", "ml/minute", "ml por min", "ml por minuto"},
+    "mg/mL": {"mg/ml", "mg/milliliter", "mg/millilitre", "mg/mililitro"},
+    "mcg/kg/min": {"mcg/kg/min", "µg/kg/min", "ug/kg/min", "mcg/kg/minuto", "µg/kg/minuto",
+                   "ug/kg/minuto", "mcg/kg/minute", "µg/kg/minute", "ug/kg/minute"},
+    # units used in tasks.jsonl
+    "mg/día": {"mg/dia", "mg/d", "mg/day", "mg/24h", "mg/24 h"},
+    "mg/dosis": {"mg/dosis", "mg/dose"},
+    "mL/dosis": {"ml/dosis", "ml/dose"},
+    "mg/h": {"mg/h", "mg/hr", "mg/hora", "mg/horas", "mg por hora"},
+    "%": {"%", "por ciento"},
+}
 
 
 def _fold(text: str) -> str:
@@ -53,6 +81,35 @@ def _readings(token: str) -> list[float]:
         readings.append(float(parts[0] + parts[1]))
     return readings
 
+def _unit_key(text: str) -> str:
+    """Folded unit text: no accents, lower case, micro/mu -> mc, single spaces, no spaces
+    around '/'."""
+    text = _fold(text).replace("μ", "mc")  # _fold (NFKD) turns µ U+00B5 into μ U+03BC
+    text = re.sub(r"\s+", " ", text.replace("\u00a0", " ")).strip()
+    return re.sub(r"\s*/\s*", "/", text)
+
+def _build_alias_index() -> dict[str, frozenset[str]]:
+    index: dict[str, frozenset[str]] = {}
+    for canonical, aliases in UNIT_ALIASES.items():
+        group = frozenset(_unit_key(a) for a in set(aliases) | {canonical})
+        for key in group:
+            if key in index and index[key] != group:
+                raise ValueError(f"unit alias {key!r} appears in two different groups")
+            index[key] = group
+    return index
+
+_ALIAS_INDEX = _build_alias_index()
+
+def _unit_aliases(unit: str) -> frozenset[str]:
+    key = _unit_key(unit)
+    return _ALIAS_INDEX.get(key, frozenset({key}))
+
+def _starts_with_unit(tail: str, alias: str) -> bool:
+    """tail starts with alias and the unit does not continue (mg must not match mg/kg or mgs)."""
+    if not tail.startswith(alias):
+        return False
+    rest = tail[len(alias):len(alias) + 1]
+    return not rest or not (rest.isalnum() or rest == "/")
 
 def number_values(text: str) -> list[float]:
     """Every value that the numbers written in text can mean (see _readings)."""
@@ -62,19 +119,45 @@ def number_values(text: str) -> list[float]:
         values.extend(sign * value for value in _readings(token.lstrip("-")))
     return values
 
+def final_part(answer: str) -> str:
+    """The text that strict mode scores: the final answer without [file#n] citations.
 
-def check_answer(task: dict, final_answer: str) -> bool:
+    final_answer is already the content of the agent's final_answer tool, so all of it counts
+    (multi-result answers, as in t19 and t20, may span several paragraphs).
+    """
+    return _CITATION.sub(" ", answer).strip()
+
+def _token_values(token: str) -> list[float]:
+    sign = -1.0 if token.startswith("-") else 1.0
+    return [sign * v for v in _readings(token.lstrip("-"))]
+
+def _number_with_unit(text: str, value: float, tolerance: float, units: list[str]) -> bool:
+    """Some number within tolerance of value, written right before one of the units."""
+    wanted = set().union(*(_unit_aliases(u) for u in units)) if units else set()
+    for match in _NUMBER.finditer(text):
+        if not any(abs(n - value) <= tolerance + 1e-9 for n in _token_values(match.group())):
+            continue
+        if not wanted:
+            return True
+        tail = _unit_key(text[match.end(): match.end() + 30])
+        if any(_starts_with_unit(tail, alias) for alias in wanted):
+            return True
+    return False
+
+def check_answer(task: dict, final_answer: str, mode: str = "strict") -> bool:
     """Automatic check of the final answer, according to the task's check field.
 
-    Kinds: contains (ignores case and accents), regex (as written: use (?i) for
-    case), number (any number in the answer within tolerance of value; reads
-    7,5 and 1.050 the Spanish way too), all and any (lists of checks in
-    checks). Any check can set "negate": true to require the opposite.
+    Kinds: contains, regex, all, any (as before) and number. With mode="lax" (the old
+    behaviour) number accepts any matching number anywhere in the answer. With
+    mode="strict" the number must be in the final part of the answer (see final_part) and
+    followed by the unit in check["unit"] (a string or a list; aliases like mcg/µg and
+    mL/h/ml/h are equivalent). A number check with no unit is only valid in strict mode if
+    it sets "unitless": true (validate_bench enforces it).
     """
-    return _check(task.get("check", {}), final_answer)
+    return _check(task.get("check", {}), final_answer, mode)
 
 
-def _check(check: dict, answer: str) -> bool:
+def _check(check: dict, answer: str, mode: str = "strict") -> bool:
     kind, value = check.get("type"), check.get("value")
     if kind == "contains":
         result = _fold(str(value)) in _fold(answer)
@@ -82,11 +165,16 @@ def _check(check: dict, answer: str) -> bool:
         result = re.search(value, answer) is not None
     elif kind == "number":
         tolerance = check.get("tolerance", 0)
-        result = any(abs(n - float(value)) <= tolerance + 1e-9 for n in number_values(answer))
+        if mode == "lax":
+            result = any(abs(n - float(value)) <= tolerance + 1e-9 for n in number_values(answer))
+        else:
+            unit = check.get("unit")
+            units = [unit] if isinstance(unit, str) else list(unit or [])
+            result = _number_with_unit(final_part(answer), float(value), tolerance, units)
     elif kind == "all":
-        result = all(_check(c, answer) for c in check.get("checks", []))
+        result = all(_check(c, answer, mode) for c in check.get("checks", []))
     elif kind == "any":
-        result = any(_check(c, answer) for c in check.get("checks", []))
+        result = any(_check(c, answer, mode) for c in check.get("checks", []))
     else:
         return False
     return not result if check.get("negate") else result
@@ -104,12 +192,16 @@ def automatic_tools(steps: list[dict]) -> set[str]:
 
 def summarise(rows: list[dict]) -> dict:
     n = max(len(rows), 1)
-    return {
+    out = {
         "n_tasks": len(rows),
         "success_rate": sum(r["correct"] for r in rows) / n,
         "mean_steps": sum(r["n_steps"] for r in rows) / n,
         "mean_tokens": sum(r["tokens_used"] for r in rows) / n,
     }
+    if rows and all("correct_lax" in r for r in rows):
+        out["success_rate_lax"] = sum(r["correct_lax"] for r in rows) / n
+        out["lucky_hits"] = sum(r["correct_lax"] and not r["correct"] for r in rows)
+    return out
 
 
 def summarise_brain(rows: list[dict], config: dict | None = None) -> dict:
@@ -152,6 +244,7 @@ def main() -> None:
         help="leave out CIMA, convert_units, dose_calculator and the sheet tool",
     )
     parser.add_argument("--few-shot", type=bool, default=True)
+    parser.add_argument("--check-mode", choices=["strict", "lax"], default="strict")
     args = parser.parse_args()
 
     from dotenv import load_dotenv
@@ -177,14 +270,16 @@ def main() -> None:
             for i, task in enumerate(tasks, 1):
                 response = agent.run(task["task"], max_steps=args.max_steps, brain=brain)
                 response = response.model_dump()
-                ok = response["succeeded"] and check_answer(task, response["final_answer"])
+                ok_ans = response["succeeded"] and check_answer(task, response["final_answer"], args.check_mode)
+                lax = response["succeeded"] and check_answer(task, response["final_answer"], "lax")
                 used = tools_used(response["steps"])
                 by_agent = automatic_tools(response["steps"])
                 rows.append(
                     {
                         **task,
                         **response,
-                        "correct": ok,
+                        "correct": ok_ans, 
+                        "correct_lax": lax,
                         "tools_used": sorted(used),
                         "auto_tools": sorted(by_agent),
                         "required_tools_used": set(task.get("required_tools", []))
@@ -193,7 +288,7 @@ def main() -> None:
                 )
                 print(
                     f"[{brain}] {i}/{len(tasks)} {task.get('id', '?')}: "
-                    f"{'OK' if ok else 'fail'} ({response['n_steps']} steps)",
+                    f"{'OK' if ok_ans else 'fail'} ({response['n_steps']} steps)",
                     flush=True,
                 )
         except (ValueError, OSError) as error:  # e.g. the rlm adapter is not configured

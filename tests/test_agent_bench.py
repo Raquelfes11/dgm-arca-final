@@ -112,7 +112,7 @@ def test_evaluate_expression_is_plain_arithmetic():
 def test_validate_reports_the_usual_mistakes():
     good = {
         "id": "a", "task": "t", "required_tools": ["dose_calculator", "convert_units"],
-        "check": {"type": "number", "value": 480}, "answer_exprs": ["6 * 80"],
+        "check": {"type": "number", "value": 480, "unit": "mg"}, "answer_exprs": ["6 * 80"],
     }
     assert validate([good], tools=TOOLS) == []
     wrong_number = {**good, "id": "b", "answer_exprs": ["6 * 70"]}
@@ -208,3 +208,29 @@ def test_invented_answers_do_not_pass_the_refusal_checks(tasks):
     for task_id, texts in invented.items():
         for text in texts:
             assert not check_answer(edge_task(tasks, task_id), text), (task_id, text)
+
+def t(**check): return {"check": {"type": "number", **check}}
+
+@pytest.mark.parametrize("answer,ok", [
+    ("La dosis es 750 µg.", True),
+    ("La dosis es 750 mcg", True),
+    ("750 mg", False),                       # mg/mcg confusion
+    ("Pauta: 2 mL/h", True),
+    ("2 ml/h", True),
+    ("Son 7 comprimidos y 2 gotas", False),  # 2 by chance, wrong unit
+    ("20 gotas/min", False),
+    ("5 mg/kg", False),                      # unit continues
+    ("<final_answer>Velocidad: 2,5 ml/h</final_answer>", True),
+])
+def test_unit_strict(answer, ok):
+    value = 750 if "750" in answer else 2.5 if "2,5" in answer else 2
+    unit = "mcg" if "750" in answer else "mL/h"
+    assert check_answer(t(value=value, unit=unit), answer) is ok
+
+def test_lax_ignores_unit():
+    assert check_answer(t(value=750, unit="mcg"), "750 mg", mode="lax")
+
+def test_citation_digits_do_not_count():
+    answer = "El resultado es 12 [aciclovir_00002#25]."
+    assert not check_answer(t(value=25, unitless=True), answer)
+    assert check_answer(t(value=25, unitless=True), answer, mode="lax")
