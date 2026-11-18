@@ -15,6 +15,8 @@ script checks that:
 * with --retrieval: whether the phase-3 retriever (the one behind search_knowledge_base)
   brings that passage in its top k for the task text. It separates tasks the agent cannot
   solve because the passage never reaches it from tasks it solves badly.
+* every number check says which unit the value is in (or "unitless": true), because
+  agent/evaluate.py scores value and unit together;
 """
 
 from __future__ import annotations
@@ -107,6 +109,17 @@ def check_problems(check: dict) -> list[str]:
             float(check["value"])
         except (TypeError, ValueError):
             problems.append(f"number check with a non-numeric value {check['value']!r}")
+        unit = check.get("unit")
+        if unit is None:
+            if check.get("unitless") is not True:
+                problems.append("number check needs 'unit' (or 'unitless': true)")
+        else:
+            units = [unit] if isinstance(unit, str) else unit
+            if not (isinstance(units, list) and units
+                    and all(isinstance(u, str) and u.strip() for u in units)):
+                problems.append("'unit' must be a non-empty string or a list of strings")
+            if check.get("unitless"):
+                problems.append("'unit' and 'unitless' cannot be used together")
     return problems
 
 

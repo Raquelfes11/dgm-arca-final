@@ -3154,3 +3154,37 @@ Toda esta información podemos encontrarla en el informe guardado en `reports/fi
 4. **El resultado de `thinking` es considerablemente mejor que el de `base` y `rlm`:** obtiene un 75% de éxito frente al 25 % y el 25%, respectivamente.
 
 ---
+
+### 2026-18-11 · Proyecto final · Check respuesta del agente más estricto
+
+**Qué queríamos saber.** Queríamos hacer más estrictia la evaluación de la respuesta del agente incluyendo que devuelva las unidades que se piden en la pregunta y chequeando que el número identificado como respuesta final sea realmente la respuesta del agente.
+
+**Qué hicimos.** Para exigirle al modelo que devuelva las unidades pedidas, primero tuvimos que incluir en las filas que requiren unidades, en el campo `check` de `agent/bench/tasks.jsonl` un campo que se hemos llamado `unit` que indica que unidades se espera que el agente devuelva. Si la respuesta es numérica pero no require de unidades, entonces el campo incluido en `check` es `"unitless": true`.
+
+Para implementar esto, hemos incluido un chequeador de unidades en el fichero `agent/evaluate.py`.
+
+Otro cambio que hemos implementado es que se cheque que la respuesta correcta no esté por casualidad en la cita. De esta forma, si la solución esperada es 80 y la respuesta del agente ha sido la siguiente:
+`La respuesta es 4 [adrenalina_xx80xxx.md]` se evaluará como incorrecta la pregunta.
+
+Por último, ahora chequeamos también que la respuesta correcta no aparezca en un paso intermedio de la respuesta del agente. Así evitamos casos como el que encontramos en la t11 del report `reports/fix/few_shot/fixfew_shot__eval.json`, donde la respuesta correcta es 0.7 pero el modelo responde lo siguiente que anteriormente se consideraba como correcto:
+
+`La dosis de carga es 0.7 microgramos/kg/h × 70 kg = 49 microgramos/h. Con la concentración de 100 microgramos/mL, el volumen necesario es 49 / 100 = 0.49 mL. La respuesta es 0.49 mL de concentrado [dexmedetomidina_00001#1].`
+
+Para obtener la nueva evaluación de un agente no hace falta reentrenarlo si se tiene el report guardado. Para analizar el rendimiento del agente de la entrada anterior, se ejecuta este comando:
+```
+uv run python -m agent.rescore --report reports/fix/few_shot/fixfew_shot__eval.json
+```
+
+**Qué pasó.** Tras ejecutar el rescore, obtenemos los siguientes resultados recalculados para el agente de la entrada anterior:
+
+|  | base | rlm | thinking |
+|---|---|---|---|
+| 20 tareas core = lax (before) | 0.25 | 0.25 | 0.75 |
+| 20 tareas strict (now) | 0.25 | 0.25 | 0.70 |
+| 20 tareas lucky hits | --- | --- | t11 |
+| edge cases core (before) | 0.00 | 0.40 | 0.80 |
+| edge cases strict (now) | 0.00 | 0.40 | 0.80 |
+
+**Qué concluimos.** Como se puede observar, el agente con el brain `thinking` obtiene un caso de éxito "falso". Es por eso que concluimos que hacer que la evaluación sea más estricta es necesaria para detectar casos que parecen correctos si no se revisan y para exigir también al agente que devuelva las unidades de la respuesta.
+
+---
