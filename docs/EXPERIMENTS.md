@@ -2804,13 +2804,7 @@ Las preguntas sin resolver son las mismas salvo al aumentar el chunk_size debido
 **Qué hicimos.** Para saber si el cambio mejoraba el agente ejecutamos el siguiente comando:
 
 ```
-uv run python -m agent.evaluate --bench agent/bench/tasks.jsonl --brains base rlm thinking --out reports/fix/05/phase4_eval_exp5.json
-```
 
-Y para obtener más información sobre los resultados y dónde ha fallado el modelo ejecutamos este comando:
-
-```
-uv run python -m agent.analyze_eval --report reports/fix/05/phase4_eval_exp5.json
 ```
 
 **Qué pasó.** Recuperando los resultados del dichero `reports/fix/05/phase4_eval_exp5.json`, construimos la siguiente tabla escribiendo entre paréntesis, el valor de la evaluación llevada a cabo el 2026-11-11:
@@ -3106,5 +3100,57 @@ entrenamiento (#20) deben usar solo la etiqueta. Lo que queda por atacar es el 2
 el formato nativo de Qwen3 o la decodificación restringida (#19), y el texto del aviso, que sigue pendiente
 de decidir en el equipo ("Do not write 'Action: name'" frente a no decir nada del `Action:`). Los
 siguientes niveles del #12 (herramienta correcta, argumentos y respuesta) quedan por hacer.
+
+---
+
+### 2026-17-11 · Proyecto final · Few shot prompt: incluimos tres ejemplos en el prompt del modelo
+
+**Qué queríamos saber.** Queríamos saber si el agente mejoraría si le incluíamos en su prompt varios ejemplos de como hacer el bucle de ReAct.
+
+**Qué hicimos.** Para ello, incluimos en el fichero `agent/prompt.py` una nueva sección en el prompt añadiendo al `REACT_SYSTEM_PROMPT` un `FEW_SHOT_EXAMPLES`. Después, añadimos un nuevo argumento en el fichero `agent/evaluate.py` que permite incluir los ejemplos en el prompt. 
+
+Para ver si los ejemplos mejoraban el modelo ejecutamos el siguiente comando:
+```
+make bench FIX=few_shot LABEL=_eval BRAINS="base rlm thinking"
+```
+
+**Qué pasó.** Como se puede observar en la siguiente tabla, el agente con el cerebro thinking obtiene un 75% de éxito en las tareas principales y un 80% de acierto en los edge cases. Además, menos de un 10% de las llamadas no son válidas y todas las llamadas utilizan correctamente la etiqueta tool_call. Sin embargo, el modelo solo obtiene un éxito fiel en un 10% de las tareas.
+
+| Métrica | base | rlm | thinking |
+|---|---|---|---|
+| Éxito en las tareas principales | 5/20 (25 %) | 5/20 (25 %) | 15/20 (75 %) |
+| Éxito fiel (correcto y con las herramientas requeridas) | 0/20 (0 %) | 0/20 (0 %) | 2/20 (10 %) |
+| Llegan a final_answer | 20/20 (100 %) | 17/20 (85 %) | 20/20 (100 %) |
+| Casos de borde acertados | 0/5 (0 %) | 2/5 (40 %) | 4/5 (80 %) |
+| Pasos sin llamada válida | 1/24 (4 %) | 9/26 (35 %) | 3/32 (9 %) |
+| Llamadas leídas de la etiqueta tool_call | 22/23 (96 %) | 17/17 (100 %) | 29/29 (100 %) |
+| Llamadas leídas del respaldo Action | 1/23 (4 %) | 0/17 (0 %) | 0/29 (0 %) |
+| Cumplen el formato (llamada válida con etiqueta) | 22/24 (92 %) | 17/26 (65 %) | 29/32 (91 %) |
+| Respuestas vacías | 0/20 (0 %) | 0/20 (0 %) | 0/20 (0 %) |
+| Busca él mismo en la base de conocimiento (si la necesita) | 0/18 (0 %) | 0/18 (0 %) | 5/18 (28 %) |
+| Con búsqueda automática previa | 20/20 (100 %) | 20/20 (100 %) | 20/20 (100 %) |
+| Pasos medios | 1.2 | 1.3 | 1.6 |
+| Tokens medios | 5642 | 7063 | 8714 |
+
+Como se ve en la siguiente tabla, el modelo thinking falla en 5 ocasiones debido a que no usa las herramientas necesarias
+
+| Clase de fallo | base | rlm | thinking |
+|---|---|---|---|
+| No llega a dar una respuesta (se agotan los pasos o no hay llamada válida) | 0/20 (0 %) | 3/20 (15 %) | 0/20 (0 %) |
+| Llama a final_answer pero sin respuesta | 0/20 (0 %) | 0/20 (0 %) | 0/20 (0 %) |
+| Responde sin usar las herramientas necesarias | 14/20 (70 %) | 12/20 (60 %) | 5/20 (25 %) |
+| Usa las herramientas necesarias pero el resultado es incorrecto | 1/20 (5 %) | 0/20 (0 %) | 0/20 (0 %) |
+
+Toda esta información podemos encontrarla en el informe guardado en `reports/fix/few_shot/fixfew_shot__eval.md`
+
+**Qué concluimos.** 
+
+1. **El few-shot mejora el éxito de las tareas principales con `thinking`:** alcanza 15/20, frente a los resultados anteriores sin estos ejemplos.
+
+2. **La mejora en éxito no equivale a una mejora en el uso correcto de las herramientas:** aunque `thinking` resuelve 15 tareas, solo 2/20 son éxitos fieles (correctas y utilizando las herramientas requeridas). Esto indica que los ejemplos ayudan al modelo a resolver las preguntas, pero todavía no garantizan que siga el procedimiento esperado.
+
+3. **El formato de las llamadas mejora con `thinking`:** todas las llamadas se realizan utilizando la etiqueta de <tool_call>
+
+4. **El resultado de `thinking` es considerablemente mejor que el de `base` y `rlm`:** obtiene un 75% de éxito frente al 25 % y el 25%, respectivamente.
 
 ---

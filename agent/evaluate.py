@@ -151,6 +151,7 @@ def main() -> None:
         action="store_true",
         help="leave out CIMA, convert_units, dose_calculator and the sheet tool",
     )
+    parser.add_argument("--few-shot", type=bool, default=True)
     args = parser.parse_args()
 
     from dotenv import load_dotenv
@@ -166,7 +167,7 @@ def main() -> None:
     ]
     if args.ids:
         tasks = [t for t in tasks if t.get("id") in set(args.ids)]
-    agent = ReActAgent.from_env(rag_mode=args.rag_mode, use_tools=not args.no_tools)
+    agent = ReActAgent.from_env(rag_mode=args.rag_mode, use_tools=not args.no_tools, few_shot=args.few_shot)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     results = {}

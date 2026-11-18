@@ -24,7 +24,7 @@ import re
 from dotenv import load_dotenv
 
 from agent.memory import ConversationMemory
-from agent.prompts import REACT_SYSTEM_PROMPT, SUMMARY_PROMPT
+from agent.prompts import REACT_SYSTEM_PROMPT, REACT_SYSTEM_PROMPT_FEWSHOT, SUMMARY_PROMPT
 from api.schemas import AgentAction, AgentResponse, AgentStep, ToolCallRecord
 from tool_use.registry import ToolRegistry, tool
 from tool_use.tools import default_registry
@@ -245,6 +245,7 @@ class ReActAgent:
     steps: list[AgentStep] = field(default_factory=list)
     _models: dict = field(default_factory=dict) # brain -> (tokenizer, model)
     rag_mode: str = "tool"  # "tool": the model decides to search, "auto": also before step 1
+    few_shot: bool = False
     _tokens_used: int = field(default=0, init=False, repr=False)  # of the run in progress
 
     def __post_init__(self) -> None:
@@ -252,7 +253,7 @@ class ReActAgent:
             raise ValueError(f"rag_mode must be one of {list(RAG_MODES)}, got {self.rag_mode!r}")
 
     @classmethod
-    def from_env(cls, rag_mode: str = "auto", use_tools: bool = True) -> ReActAgent:
+    def from_env(cls, rag_mode: str = "auto", use_tools: bool = True, few_shot: bool = False) -> ReActAgent:
         """The agent the API and the evaluation use, with two switches for the ablations.
 
         rag_mode "auto": the code searches with the task text before the first step, and the
@@ -262,7 +263,7 @@ class ReActAgent:
         use_tools False leaves out CIMA, convert_units, dose_calculator and the sheet tool.
         final_answer is always available.
         """
-        agent = cls(rag_mode=rag_mode)
+        agent = cls(rag_mode=rag_mode, few_shot=few_shot)
         if not use_tools:
             agent.registry = ToolRegistry()
         agent.registry.register(final_answer)
@@ -306,7 +307,8 @@ class ReActAgent:
         return self._models[brain]
 
     def system_prompt(self, max_steps: int) -> str:
-        return REACT_SYSTEM_PROMPT.format(
+        template = REACT_SYSTEM_PROMPT_FEWSHOT if self.few_shot else REACT_SYSTEM_PROMPT
+        return template.format(
             max_steps=max_steps, tools_description=self.registry.render_for_prompt()
         )
 
