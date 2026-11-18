@@ -24,7 +24,12 @@ import re
 from dotenv import load_dotenv
 
 from agent.memory import ConversationMemory
-from agent.prompts import REACT_SYSTEM_PROMPT, REACT_SYSTEM_PROMPT_FEWSHOT, SUMMARY_PROMPT
+from agent.prompts import (
+    REACT_SYSTEM_PROMPT,
+    REACT_SYSTEM_PROMPT_FEWSHOT,
+    SHEET_RULES,
+    SUMMARY_PROMPT,
+)
 from api.schemas import AgentAction, AgentResponse, AgentStep, ToolCallRecord
 from tool_use.registry import ToolRegistry, tool
 from tool_use.tools import default_registry
@@ -59,6 +64,34 @@ def _not_done_message(name: str, reason: str) -> str:
         "presentes como hecha. Entrega solo lo que sí has calculado o consultado."
     )
 
+
+# A tool with side effects only runs if the user's task asks for its result ("genera la hoja de
+# preparación"). If the model calls it on its own, it is blocked (see ReActAgent._call_tool).
+REQUEST_PATTERNS: dict[str, re.Pattern] = {
+    "create_preparation_sheet": re.compile(
+        r"(?:gener|cre[ae]|elabor|haz\b|hac[eé]\b|prepar|sac[ae]|imprim|export|dame|dam[eé]\b|"
+        r"necesit|quier|adjunt|incluy|con\b)\w*\b[^.?!\n]{0,40}?"
+        r"(?:hoja|ficha)\s+de\s+preparaci|(?:\bpdf\b)",
+        re.IGNORECASE,
+    ),
+}
+# "sin la hoja", "no quiero la hoja", "no generes el PDF": the user rules it out
+NEGATED_REQUEST = re.compile(
+    r"\bsin\b[^.?!\n]{0,25}(?:hoja|ficha|pdf)|\bno\b[^.?!\n]{0,30}(?:hoja|ficha|pdf)",
+    re.IGNORECASE,
+)
+
+
+def requested_tools(task: str) -> set[str]:
+    """Tools with side effects that the task explicitly asks for."""
+    if NEGATED_REQUEST.search(task):
+        return set()
+    return {name for name, pattern in REQUEST_PATTERNS.items() if pattern.search(task)}
+
+
+# Tools that create a file: the observation tells the model to quote the real path, and the code
+# checks the final answer does (name -> what it creates).
+FILE_TOOLS = {"create_preparation_sheet": "Hoja de preparación"}
 
 # Tools whose result a final answer can claim. name -> (pattern that shows the answer talks about
 # that result, how to call it in the warning). The pattern is narrow on purpose: a bare "ficha"
@@ -98,7 +131,7 @@ def check_claimed_actions(answer: str, done_tools: set[str]) -> tuple[str, list[
         )
         labels.append(label)
     if labels:
-        answer = f"AVISO: {' y '.join(labels)} NO se ha generado: la herramienta está bloqueada o ha fallado (requiere confirmación del usuario). " + answer
+        answer = f"AVISO: {' y '.join(labels)} NO se ha generado: la herramienta no se ejecutó con éxito (estaba bloqueada, falló o no se llegó a llamar). " + answer
     return answer, warnings_found
 
 
@@ -247,6 +280,10 @@ class ReActAgent:
     rag_mode: str = "tool"  # "tool": the model decides to search, "auto": also before step 1
     few_shot: bool = False
     _tokens_used: int = field(default=0, init=False, repr=False)  # of the run in progress
+    _requested: set = field(default_factory=set, init=False, repr=False)  # side-effect tools the task asks for
+    # The agent keeps the trace and the token count of the run in progress, and FastAPI serves
+    # requests from several threads: runs go one at a time (one GPU anyway) so they cannot mix.
+    _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.rag_mode not in RAG_MODES:
@@ -306,8 +343,11 @@ class ReActAgent:
 
         return self._models[brain]
 
-    def system_prompt(self, max_steps: int) -> str:
+    def system_prompt(self, max_steps: int, sheet: bool = False) -> str:
+        """``sheet`` adds the rules for the preparation sheet: only a run whose task asks for it."""
         template = REACT_SYSTEM_PROMPT_FEWSHOT if self.few_shot else REACT_SYSTEM_PROMPT
+        if sheet:
+            template = template.replace("- You have at most", SHEET_RULES + "- You have at most", 1)
         return template.format(
             max_steps=max_steps, tools_description=self.registry.render_for_prompt()
         )
@@ -344,17 +384,17 @@ class ReActAgent:
     def _call_tool(self, name: str, arguments: dict) -> ToolCallRecord:
         """Run one tool call with a time limit. Never raises: a failure comes back as a record.
 
-        Tools marked ``requires_confirmation`` are not run: nobody can confirm during a
-        ``POST /agent`` call, so the model is told and can choose another way.
+        Tools marked ``requires_confirmation`` (side effects) only run if the user's task asked
+        for them (``self._requested``). Otherwise they are blocked and the model is told.
         """
         spec = self.registry.tools.get(name)
-        if spec is not None and spec.requires_confirmation:
+        if spec is not None and spec.requires_confirmation and name not in self._requested:
             return ToolCallRecord(
                 name=name,
                 arguments=arguments,
                 ok=False,
                 error=_not_done_message(
-                    name, "está BLOQUEADA: requiere confirmación del usuario y aquí no se puede ejecutar"
+                    name, "está BLOQUEADA: el usuario no ha pedido esta acción en su mensaje, así que no se ejecuta"
                 ),
                 requires_confirmation=True,
             )
@@ -402,11 +442,13 @@ class ReActAgent:
 
     def run(self, task: str, max_steps: int = 10, brain: str = "rlm") -> AgentResponse:
         """What ``POST /agent`` calls: runs the loop and fills in ``model`` and ``tokens_used``."""
-        self._tokens_used = 0
-        response = self._run_loop(task, max_steps, brain)
-        response.model = self._model_label(brain)
-        response.tokens_used = self._tokens_used
-        return response
+        with self._lock:
+            self._tokens_used = 0
+            self._requested = requested_tools(task)
+            response = self._run_loop(task, max_steps, brain)
+            response.model = self._model_label(brain)
+            response.tokens_used = self._tokens_used
+            return response
 
     def _auto_search(self, task: str, memory: ConversationMemory) -> None:
         """Search the knowledge base with the task text before the first model step.
@@ -443,7 +485,10 @@ class ReActAgent:
             return len(tokenizer.encode(text))
 
         memory = ConversationMemory(
-            self.system_prompt(max_steps), count_tokens, self.token_budget, pin_first=True
+            self.system_prompt(max_steps, sheet="create_preparation_sheet" in self._requested),
+            count_tokens,
+            self.token_budget,
+            pin_first=True,
         )
         memory.add("user", task)
         if self.rag_mode == "auto":
@@ -451,6 +496,8 @@ class ReActAgent:
         nudged = False  # True after we already asked the model once to fix its format
         seen: dict[tuple[str, str], int] = {}  # (tool, arguments) -> times called
         done_tools: set[str] = set()  # tools that returned ok=True: only these results are real
+        outputs: list[str] = []  # paths of the files the tools created
+        reminded = False  # True after we told the model once that the task asks for a tool it did not call
         for step in range(max_steps):
             raw = self.generate(memory.render(), brain)
             if raw.count("<tool_call>") > raw.count("</tool_call>"):
@@ -500,7 +547,25 @@ class ReActAgent:
             action = AgentAction(name=call.name, arguments=call.arguments)
             if call.name == "final_answer":
                 self.steps.append(AgentStep(thought=thought, action=action, call_route=route))
+                missing = sorted(self._requested - done_tools)
+                if missing and not reminded and step + 1 < max_steps:
+                    # the task asks for a tool and the model wants to finish without calling it:
+                    # say so once instead of letting it claim a result that does not exist
+                    reminded = True
+                    message = (
+                        f"La tarea pide explícitamente el resultado de {missing} y todavía NO has "
+                        "llamado a esa herramienta con éxito, así que no puedes darlo por hecho. "
+                        "Calcula lo que falte con dose_calculator, llama a la herramienta y después "
+                        "usa final_answer."
+                    )
+                    self.steps[-1].observation = message
+                    memory.add("assistant", raw)
+                    memory.add("user", message)
+                    continue
                 answer, flags = check_claimed_actions(_answer_text(call.arguments), done_tools)
+                for path in outputs:  # the model must name the real file: if not, the code does
+                    if Path(path).name not in answer:
+                        answer += f"\n\nRuta real del archivo generado: {path}"
                 return AgentResponse(
                     final_answer=answer,
                     steps=self.steps,
@@ -520,6 +585,13 @@ class ReActAgent:
             if record.ok:
                 done_tools.add(call.name)
             observation =str(record.result if record.ok else record.error)
+            if record.ok and call.name in FILE_TOOLS:
+                outputs.append(observation)
+                observation = (
+                    f"{FILE_TOOLS[call.name]} generada correctamente. Ruta del archivo: {observation}. "
+                    "En tu respuesta final incluye el resultado del cálculo (dosis y volumen o "
+                    "velocidad) y esta ruta exacta; no inventes otro nombre ni enlace."
+                )
             if seen[key] == 2:  # second identical call: run it, but warn the model
                 observation += (
                     "\n[Warning: you already made this exact call and the result will not "

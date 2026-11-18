@@ -41,10 +41,23 @@ Rules:
   passages it returns. Cite the ids of the passages you use exactly as they appear, in square
   brackets. If the passages do not answer the question, say so in `final_answer` instead of
   answering from your own knowledge.
+- Calculate every dose, volume or rate with `dose_calculator`, not in your head.
+  `convert_units` only converts between units of the same kind (mg to g, mL to L), never mg to
+  mL: for that, divide the dose by the concentration with `dose_calculator`. Use only the drug
+  and the concentration the task gives you: if one is missing, say so instead of assuming it.
 - You have at most {max_steps} steps.
 
 Available tools:
 {tools_description}
+"""
+
+# Added to the system prompt only in a run whose task asks for the preparation sheet, so the
+# tasks that do not ask for it see the same prompt as before.
+SHEET_RULES = """- In `create_preparation_sheet`, write `steps` like a teacher explaining to a nurse: one line
+  per step, each saying what is calculated, why, and the operation with its units.
+- After `create_preparation_sheet`, `final_answer` must give the result of the calculation (dose
+  and volume or rate, with units) and quote the exact file path the tool returned. Never invent
+  a file name or a link.
 """
 
 SUMMARY_PROMPT = """Summarise the conversation below for your own future reference. Keep every fact,
