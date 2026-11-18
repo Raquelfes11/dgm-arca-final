@@ -3214,3 +3214,62 @@ uv run python -m agent.analyze_eval --report reports/fix/09/fix09_few_shot__eval
 **Qué concluimos.** Para poder evaluar la capacidad de citación del agente, debemos actualizar los ejemplos de su prompt para que sigan el formato esperado por el chequeador.
 
 ---
+
+### 2026-18-11 · Proyecto final · Prompt con ejemplos de buenas citas
+
+**Qué queríamos saber.** Con el fin de que el agente siga la misma estructura de citado que esperamos, hemos modificado los ejemplos del prompt para que el agente tenga una referencia de cómo se debe de citar bien.
+
+**Qué hicimos.** Hemos modificado la forma de citar de los ejemplos del `FEW_SHOT_EXAMPLES` que se encuentra en el fichero `agent/prompts.py`. Después, hemos creado una nueva función en `analyze_eval.py` para que genere una tabla clasificando los tipos de trazabilidad y citas que presentan las respuestas.
+
+Para obtener de nuevo las respuestas hemos ejecutado el siguiente comando que ha generado automáticamente las tablas al terminar la inferencia:
+```
+make bench FIX=09 LABEL=updated_prompt_cites BRAINS="base rlm thinking"
+```
+
+**Qué pasó.** Como se puede observar en la siguiente tabla, el agente `thinking` falla una tarea más con este nuevo prompt. Sin embargo, esto puede deberse también a la estocasticidad del proceso de generación. En los casos borde, este agente presenta un 80% de éxito y sigue realizando correctamente todas las llamadas a las herramientas. Además, presenta un 93% de llamadas válidas que cumplen el formato.
+
+| Métrica | base | rlm | thinking |
+|---|---|---|---|
+| Éxito en las tareas principales | 3/20 (15 %) | 7/20 (35 %) | 13/20 (65 %) |
+| Aciertos casuales (lucky hits) | 1/20 (5 %) | 0/20 (0 %) | 1/20 (5 %) |
+| Éxito fiel (correcto y con las herramientas requeridas) | 0/20 (0 %) | 0/20 (0 %) | 1/20 (5 %) |
+| Llegan a final_answer | 19/20 (95 %) | 20/20 (100 %) | 20/20 (100 %) |
+| Casos de borde acertados | 0/5 (0 %) | 2/5 (40 %) | 4/5 (80 %) |
+| Pasos sin llamada válida | 3/25 (12 %) | 2/22 (9 %) | 2/29 (7 %) |
+| Llamadas leídas de la etiqueta tool_call | 21/22 (95 %) | 20/20 (100 %) | 27/27 (100 %) |
+| Llamadas leídas del respaldo Action | 1/22 (5 %) | 0/20 (0 %) | 0/27 (0 %) |
+| Cumplen el formato (llamada válida con etiqueta) | 21/25 (84 %) | 20/22 (91 %) | 27/29 (93 %) |
+| Respuestas vacías | 0/20 (0 %) | 0/20 (0 %) | 0/20 (0 %) |
+| Busca él mismo en la base de conocimiento (si la necesita) | 0/18 (0 %) | 0/18 (0 %) | 5/18 (28 %) |
+| Con búsqueda automática previa | 20/20 (100 %) | 20/20 (100 %) | 20/20 (100 %) |
+| Pasos medios | 1.2 | 1.1 | 1.4 |
+| Tokens medios | 6383 | 6026 | 8798 |
+
+La tabla de trazabilidad generada es la siguiente:
+| Clase | base | rlm | thinking |
+|---|---|---|---|
+| Correcto y trazable (citas válidas y de la evidencia) | 2/18 (11 %) | 2/18 (11 %) | 8/18 (44 %) |
+| Correcto pero sin ninguna cita | 0/18 (0 %) | 3/18 (17 %) | 0/18 (0 %) |
+| Correcto pero con citas inventadas (no devueltas por la búsqueda) | 0/18 (0 %) | 0/18 (0 %) | 0/18 (0 %) |
+| Correcto con citas válidas, pero no de la ficha que contiene la evidencia | 0/18 (0 %) | 0/18 (0 %) | 3/18 (17 %) |
+| Incorrecto y la evidencia nunca llegó al modelo (fallo del retriever) | 7/18 (39 %) | 7/18 (39 %) | 5/18 (28 %) |
+| Incorrecto aunque tenía la evidencia y la citó bien (fallo de cálculo o lectura) | 8/18 (44 %) | 2/18 (11 %) | 2/18 (11 %) |
+| Incorrecto, con la evidencia recuperada pero sin cita válida de ella | 1/18 (6 %) | 4/18 (22 %) | 0/18 (0 %) |
+| **Total** | 18/18 (100 %) | 18/18 (100 %) | 18/18 (100 %) |
+
+Como podemos observar, el agente con el cerebro `thinking` vuelve a presentar el mejor rendimiento.Éste devuelve la respuesta y la cita correctas en un 44% de las ocasiones, siendo un 28% de los fallos en la cita debidos a que el retriever no extrajo los chunks correctos. Por lo tanto, este no es un fallo de la capacidad del agente para citar.
+
+En un 17% de las ocasiones, el agente devuelve citas con un formato válido pero de fichas incorrectas y, en un 11% de los casos, la cita es la correcta pero el agente comete un fallo de cálculo o lectura
+
+**Qué concluimos.** Por lo tanto, el agente es capaz de citar con un formato válido y en casi la mitad de las tareas que le planteamos es capaz de obtener la respuesta correcta citando. La mayor causa de que falle la correctitud y la trazabilidad de la respuesta es debido a que el retriever no devuelve el chunk correcto (28%).
+
+Si revisamos el 17% de `thinking` con citas válidas pero de otra ficha podemos observar como son respuestas correctas pero que no se realizan llamadas a todos los medicamentos por lo que no citan todos los chunks que debería. Esto ocurre por ejemplo en la ficha t16.
+
+Otras posibles mejoras son:
+
+- **Mejorar el retriever** (es la causa principal en los tres cerebros: 39 %, 39 % y 28 %). Como el fallo es casi idéntico en `base` y `rlm`, no depende del modelo sino de la búsqueda. Se puede probar a aumentar `top_k` o a reformular la consulta antes de buscar. Que `thinking` falle menos (28 %) sugiere que reformular la consulta ayuda.
+- **Mejorar el prompt.** Se puede hacer un ejemplo que muestre como debe pensar el modelo en el caso de que le pidan información de más de un medicamento.
+
+Hay que interpretar estos resultados con cautela: con 18 tareas, una diferencia de una o dos tareas ya mueve el porcentaje entre 6 y 11 puntos, así que solo la distancia entre `thinking` y los otros dos cerebros es claramente significativa.
+
+---
