@@ -29,9 +29,21 @@ FAILURE_CLASSES = {
     "no_termina": "No llega a dar una respuesta (se agotan los pasos o no hay llamada válida)",
     "respuesta_vacia": "Llama a final_answer pero sin respuesta",
     "sin_herramientas": "Responde sin usar las herramientas necesarias",
+    "valor_sin_unidad": "El valor aparece pero sin la unidad correcta o fuera de la respuesta final (lucky hit)",
     "resultado_incorrecto": "Usa las herramientas necesarias pero el resultado es incorrecto",
 }
 
+# Mutually exclusive, first match wins. They cover every core task that relies on the
+# knowledge base, so their sum is always n_traced.
+TRACE_CLASSES = {
+    "trazable": "Correcto y trazable (citas válidas y de la evidencia)",
+    "correcto_sin_cita": "Correcto pero sin ninguna cita",
+    "correcto_cita_inventada": "Correcto pero con citas inventadas (no devueltas por la búsqueda)",
+    "correcto_otra_fuente": "Correcto con citas válidas, pero no de la ficha que contiene la evidencia",
+    "incorrecto_no_recuperada": "Incorrecto y la evidencia nunca llegó al modelo (fallo del retriever)",
+    "incorrecto_bien_citado": "Incorrecto aunque tenía la evidencia y la citó bien (fallo de cálculo o lectura)",
+    "incorrecto_sin_fuente": "Incorrecto, con la evidencia recuperada pero sin cita válida de ella",
+}
 
 def classify_failure(row: dict) -> str | None:
     """Class of a failed run (see FAILURE_CLASSES), or None if the run was correct."""
@@ -43,8 +55,28 @@ def classify_failure(row: dict) -> str | None:
         return "respuesta_vacia"
     if not row.get("required_tools_used", False):
         return "sin_herramientas"
+    if row.get("correct_lax") and not row["correct"]:
+        return "valor_sin_unidad"
     return "resultado_incorrecto"
 
+def classify_traceability(row: dict) -> str | None:
+    """Class of a task that relies on the knowledge base (see TRACE_CLASSES), else None."""
+    cites = row.get("citations")
+    if cites is None:  # not traced: no search_knowledge_base required, or an old report
+        return None
+    if row["correct"]:
+        if row.get("traceable"):
+            return "trazable"
+        if not cites["cited"]:
+            return "correcto_sin_cita"
+        if cites["invalid_citations"]:
+            return "correcto_cita_inventada"
+        return "correcto_otra_fuente"
+    if not cites["evidence_retrieved"]:
+        return "incorrecto_no_recuperada"
+    if cites["citations_valid"] and cites["evidence_cited"]:
+        return "incorrecto_bien_citado"
+    return "incorrecto_sin_fuente"
 
 def _rate(part: int, total: int) -> float:
     return part / total if total else 0.0
@@ -61,6 +93,15 @@ def analyse_brain(rows: list[dict]) -> dict:
         kind = classify_failure(row)
         if kind:
             failures[kind] += 1
+    has_lax = bool(core) and all("correct_lax" in r for r in core)
+    traced = [r for r in core if r.get("traceable") is not None]
+    cites = [r["citations"] for r in traced]
+    
+    trace_classes = {name: 0 for name in TRACE_CLASSES}
+    for row in core:
+        kind = classify_traceability(row)
+        if kind:
+            trace_classes[kind] += 1
     return {
         "n_core": len(core),
         "n_edge": len(edge),
@@ -82,6 +123,17 @@ def analyse_brain(rows: list[dict]) -> dict:
         "mean_steps": sum(r["n_steps"] for r in core) / len(core) if core else 0.0,
         "mean_tokens": sum(r["tokens_used"] for r in core) / len(core) if core else 0.0,
         "failures": failures,
+        "has_lax": has_lax,
+        "correct_lax": sum(bool(r.get("correct_lax")) for r in core) if has_lax else 0,
+        "lucky": sum(bool(r.get("correct_lax")) and not r["correct"] for r in core),
+        "n_traced": len(traced),
+        "traceable": sum(r["traceable"] for r in traced),
+        "cited": sum(c["cited"] for c in cites),
+        "invalid_cites": sum(bool(c["invalid_citations"]) for c in cites),
+        "evidence_retrieved": sum(c["evidence_retrieved"] for c in cites),
+        "evidence_cited": sum(c["evidence_cited"] for c in cites),
+        "correct_untraceable": sum(r["correct"] and not r["traceable"] for r in traced),
+        "trace_classes": trace_classes,
     }
 
 
@@ -96,11 +148,17 @@ def analyse(results: dict) -> dict:
 
 
 def _grid(results: dict) -> dict[str, dict[str, str]]:
-    """{task id: {brain: "OK" | "fallo"}}."""
+    """{task id: {brain: "OK" | "casual" | "fallo"}}."""
     grid: dict[str, dict[str, str]] = {}
     for brain, result in results.items():
         for row in result["rows"]:
-            grid.setdefault(row["id"], {})[brain] = "OK" if row["correct"] else "fallo"
+            if row["correct"]:
+                cell = "OK"
+            elif row.get("correct_lax"):
+                cell = "casual"
+            else:
+                cell = "fallo"
+            grid.setdefault(row["id"], {})[brain] = cell
     return dict(sorted(grid.items()))
 
 
@@ -111,6 +169,11 @@ def _pct(part: int, total: int) -> str:
 def _route_pct(metrics: dict, part: int, total: int) -> str:
     """A percentage of the call route metrics, or no data for reports made before they existed."""
     return _pct(part, total) if metrics["has_route"] else "sin dato"
+
+
+def _data_pct(available: bool, part: int, total: int) -> str:
+    """A percentage, or no data for reports made before the metric existed."""
+    return _pct(part, total) if available else "sin dato"
 
 
 def render(analysis: dict, grid: bool = True) -> str:
@@ -128,6 +191,8 @@ def render(analysis: dict, grid: bool = True) -> str:
 
     metrics = [
         ("Éxito en las tareas principales", lambda m: _pct(m["correct"], m["n_core"])),
+        ("Aciertos casuales (lucky hits)",
+         lambda m: _data_pct(m["has_lax"], m["lucky"], m["n_core"])),
         ("Éxito fiel (correcto y con las herramientas requeridas)",
          lambda m: _pct(m["faithful"], m["n_core"])),
         ("Llegan a final_answer", lambda m: _pct(m["finished"], m["n_core"])),
@@ -148,6 +213,24 @@ def render(analysis: dict, grid: bool = True) -> str:
     ]
     table("Resumen por cerebro", ["Métrica"] + names,
           [[label] + [fn(brains[b]) for b in names] for label, fn in metrics])
+
+    if any(brains[b]["n_traced"] for b in names):
+        def trace_cell(b: str, count: int) -> str:
+            m = brains[b]
+            return _pct(count, m["n_traced"]) if m["n_traced"] else "sin dato"
+
+        assert all(
+            sum(brains[b]["trace_classes"].values()) == brains[b]["n_traced"] for b in names
+        ), "the traceability classes must add up to the number of traced tasks"
+        table(
+            "Trazabilidad de las tareas que usan la base de conocimiento",
+            ["Clase"] + names,
+            [
+                [text] + [trace_cell(b, brains[b]["trace_classes"][key]) for b in names]
+                for key, text in TRACE_CLASSES.items()
+            ]
+            + [["**Total**"] + [trace_cell(b, brains[b]["n_traced"]) for b in names]],
+        )
 
     table(
         "Por qué fallan las tareas principales",

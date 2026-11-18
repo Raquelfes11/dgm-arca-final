@@ -23,7 +23,10 @@ from pathlib import Path
 # A number as written in Spanish or English: 7, 7.5, 7,5, 1.050, 1,050.5, 1.050,5, 8.400.000.
 # It must not be glued to a letter on the left, so "2-8" gives 2 and 8 and "B12" gives nothing.
 _NUMBER = re.compile(r"(?<![\w])-?\d+(?:[.,]\d+)*")
-_CITATION = re.compile(r"\[[^\]]*\]")
+_CITATION = re.compile(r"\[([^\]]*)\]")
+
+# "[0f15e47eed-0016] (dobutamina_85914.md)" at the start of each chunk returned by the retriever
+_CHUNK_HEADER = re.compile(r"^\[([^\]\s]+)\] \(([^)]+\.md)\)", re.M)
 
 UNIT_ALIASES = {
     "mL": {"ml", "milliliter", "milliliters", "millilitre", "millilitres",
@@ -190,6 +193,51 @@ def automatic_tools(steps: list[dict]) -> set[str]:
     return {s["action"]["name"] for s in steps if s.get("action") and s.get("automatic")}
 
 
+def retrieved_chunks(steps: list[dict]) -> tuple[dict[str, str], str]:
+    """chunk id -> file for every chunk the knowledge base returned in this run, plus the
+    text of all those observations (folded, for evidence lookups)."""
+    chunks, texts = {}, []
+    for s in steps:
+        action = s.get("action") or {}
+        if action.get("name") == "search_knowledge_base" and s.get("observation"):
+            chunks.update(_CHUNK_HEADER.findall(s["observation"]))
+            texts.append(s["observation"])
+    return chunks, re.sub(r"\s+", " ", _fold(" ".join(texts)))
+
+
+def citation_report(task: dict, answer: str, steps: list[dict]) -> dict | None:
+    """Traceability of the answer. None when the task does not rely on the knowledge base."""
+    if "search_knowledge_base" not in task.get("required_tools", []):
+        return None
+    chunks, observed = retrieved_chunks(steps)
+    stems = {f.removesuffix(".md"): f for f in chunks.values()}
+    cites = [
+        c.strip()
+        for m in _CITATION.findall(answer)
+        for c in re.split(r"[;,]", m)
+        if c.strip()
+    ]
+    cited_files, invalid = set(), []
+    for c in cites:
+        if c in chunks:
+            cited_files.add(chunks[c])
+        elif c.removesuffix(".md") in stems:  # file-level citation: accepted but weaker
+            cited_files.add(stems[c.removesuffix(".md")])
+        else:
+            invalid.append(c)
+    evidence = task.get("evidence", [])
+    evidence_files = {e["file"] for e in evidence}
+    return {
+        "cited": bool(cites),
+        "invalid_citations": invalid,
+        "citations_valid": bool(cites) and not invalid,
+        "evidence_retrieved": all(
+            re.sub(r"\s+", " ", _fold(e["text"])) in observed for e in evidence
+        ),
+        "evidence_cited": bool(evidence_files) and evidence_files <= cited_files,
+    }
+
+
 def summarise(rows: list[dict]) -> dict:
     n = max(len(rows), 1)
     out = {
@@ -198,9 +246,16 @@ def summarise(rows: list[dict]) -> dict:
         "mean_steps": sum(r["n_steps"] for r in rows) / n,
         "mean_tokens": sum(r["tokens_used"] for r in rows) / n,
     }
+
     if rows and all("correct_lax" in r for r in rows):
         out["success_rate_lax"] = sum(r["correct_lax"] for r in rows) / n
         out["lucky_hits"] = sum(r["correct_lax"] and not r["correct"] for r in rows)
+
+    traced = [r for r in rows if r.get("traceable") is not None]
+    if traced:
+        out["traceable_rate"] = sum(r["traceable"] for r in traced) / len(traced)
+        out["uncited_rate"] = sum(not r["citations"]["cited"] for r in traced) / len(traced)
+        out["invalid_citation_rate"] = sum(bool(r["citations"]["invalid_citations"]) for r in traced) / len(traced)
     return out
 
 
@@ -274,6 +329,7 @@ def main() -> None:
                 lax = response["succeeded"] and check_answer(task, response["final_answer"], "lax")
                 used = tools_used(response["steps"])
                 by_agent = automatic_tools(response["steps"])
+                report = citation_report(task, response["final_answer"], response["steps"])
                 rows.append(
                     {
                         **task,
@@ -284,6 +340,10 @@ def main() -> None:
                         "auto_tools": sorted(by_agent),
                         "required_tools_used": set(task.get("required_tools", []))
                         <= used | by_agent,
+                        "citations": report,
+                        "traceable":  None if report is None else bool(
+                            ok_ans and report["citations_valid"] and report["evidence_cited"]
+                        )
                     }
                 )
                 print(

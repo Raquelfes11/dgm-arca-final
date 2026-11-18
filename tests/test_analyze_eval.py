@@ -4,13 +4,14 @@ from agent.analyze_eval import FAILURE_CLASSES, analyse, analyse_brain, classify
 
 
 def row(id="t01", correct=False, succeeded=True, answer="x", tools=("final_answer",),
-        required=("search_knowledge_base", "dose_calculator"), steps=None, core=True):
+        required=("search_knowledge_base", "dose_calculator"), steps=None, core=True,
+        correct_lax=False):
     steps = steps if steps is not None else [{"action": {"name": "final_answer"}}]
     return {
         "id": id, "correct": correct, "succeeded": succeeded, "final_answer": answer,
         "tools_used": sorted(tools), "required_tools": list(required), "core": core,
         "required_tools_used": set(required) <= set(tools), "steps": steps,
-        "n_steps": len(steps), "tokens_used": 100,
+        "n_steps": len(steps), "tokens_used": 100, "correct_lax": correct_lax
     }
 
 
@@ -19,10 +20,12 @@ def test_each_failure_gets_one_class_in_order():
     assert classify_failure(row(succeeded=False)) == "no_termina"
     assert classify_failure(row(answer="  ")) == "respuesta_vacia"
     assert classify_failure(row(answer="42")) == "sin_herramientas"
+    assert classify_failure(row(correct=False, answer="42", correct_lax=True, tools=("search_knowledge_base", "dose_calculator"))) == "valor_sin_unidad"
     used = row(answer="42", tools=("search_knowledge_base", "dose_calculator", "final_answer"))
     assert classify_failure(used) == "resultado_incorrecto"
     assert set(FAILURE_CLASSES) == {
-        "no_termina", "respuesta_vacia", "sin_herramientas", "resultado_incorrecto"}
+        "no_termina", "respuesta_vacia", "sin_herramientas", "resultado_incorrecto", "valor_sin_unidad"
+    }
 
 
 def test_unfinished_run_with_empty_text_is_not_an_empty_answer():
@@ -107,3 +110,28 @@ def test_render_without_grid_omits_the_task_table():
     results = {"base": {"rows": [row("t01")]}}
     assert "Resultado por tarea" in render(analyse(results))
     assert "Resultado por tarea" not in render(analyse(results), grid=False)
+
+def test_trace_classes_add_up_to_traced_tasks():
+    def r(correct, cited, invalid, retrieved, ev_cited):
+        valid = cited and not invalid
+        return {
+            "id": "x", "core": True, "correct": correct, "succeeded": True, "steps": [],
+            "n_steps": 1, "tokens_used": 1, "final_answer": "a",
+            "required_tools": ["search_knowledge_base"],
+            "citations": {"cited": cited, "invalid_citations": ["z"] if invalid else [],
+                          "citations_valid": valid, "evidence_retrieved": retrieved,
+                          "evidence_cited": ev_cited},
+            "traceable": correct and valid and ev_cited,
+        }
+    rows = [
+        r(True, True, False, True, True),    # trazable
+        r(True, False, False, True, False),  # correcto_sin_cita
+        r(True, True, True, True, False),    # correcto_cita_inventada
+        r(True, True, False, True, False),   # correcto_otra_fuente
+        r(False, True, False, False, False), # incorrecto_no_recuperada
+        r(False, True, False, True, True),   # incorrecto_bien_citado
+        r(False, False, False, True, False), # incorrecto_sin_fuente
+    ]
+    m = analyse_brain(rows)
+    assert sum(m["trace_classes"].values()) == m["n_traced"] == 7
+    assert all(count == 1 for count in m["trace_classes"].values())
