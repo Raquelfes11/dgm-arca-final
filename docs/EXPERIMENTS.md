@@ -3187,6 +3187,91 @@ uv run python -m agent.rescore --report reports/fix/few_shot/fixfew_shot__eval.j
 
 **Qué concluimos.** Como se puede observar, el agente con el brain `thinking` obtiene un caso de éxito "falso". Es por eso que concluimos que hacer que la evaluación sea más estricta es necesaria para detectar casos que parecen correctos si no se revisan y para exigir también al agente que devuelva las unidades de la respuesta.
 
+Como podemos ver en la respuesta del agente para la tarea t11, este no sigue el formato de citas que utilizamos nosotras para mandarle la información de los chunks que puede tienen una semnántica similar a la query. Por ello, el siguiente paso será crear un chequeador de citas y modificar el prompt para ver si la citación del agente mejora.
+
+---
+
+### 2026-18-11 · Proyecto final · Chequea las citas devueltas por el agente
+
+**Qué queríamos saber.** Queremos ser capaces de evaluar las citas devueltas por el agente y mejorar su prompt para que los ejemplos del few shot reflejen verdaderamente como queremos que se vean las citas.
+
+**Qué hicimos.** Añadimos al fichero `agent/evaluate.py` dos funciones para obtener los chunks que el retriever obtiene y para ver si el agente devuelve uno de esos chunks y cuál.
+
+Para poder medir el rendimiento del mejor agente que tenemos por ahora (few shot desarrollado el 17-11-2026), añadimos los nuevos campos que se evaluan en los ficheros: `agent/rescore.py` para poder recalcular las métricas de evaluación sin tener que volver a ejecutar las pruebas; y `agent/analyze_eval.py` para que se genere la tabla con las nuevas filas. 
+
+A continuación, recalculamos las métricas:
+```
+uv run python -m agent.rescore --report reports/fix/few_shot/fixfew_shot__eval.json --out reports/fix/09/fix09_few_shot__eval.json
+```
+
+Y obtenemos las métricas con el siguiente comando:
+```
+uv run python -m agent.analyze_eval --report reports/fix/09/fix09_few_shot__eval.json
+```
+
+**Qué pasó.** Para el agente del 17-11-2026, obtenemos que su trazabilidad es del 0% y que se inventa un 89% de las citas. Este comportamiento no es tan malo como parece ya que si nos fijamos en las respuestas devueltas por el agente, éste sí está devolviendo las citas solo que en un formato distinto al esperado. Esto se debe a que el formato que se indica en los ejemplos del prompt que mandamos al LLM tienen un formato diferente al esperado.
+
+**Qué concluimos.** Para poder evaluar la capacidad de citación del agente, debemos actualizar los ejemplos de su prompt para que sigan el formato esperado por el chequeador.
+
+---
+
+### 2026-18-11 · Proyecto final · Prompt con ejemplos de buenas citas
+
+**Qué queríamos saber.** Con el fin de que el agente siga la misma estructura de citado que esperamos, hemos modificado los ejemplos del prompt para que el agente tenga una referencia de cómo se debe de citar bien.
+
+**Qué hicimos.** Hemos modificado la forma de citar de los ejemplos del `FEW_SHOT_EXAMPLES` que se encuentra en el fichero `agent/prompts.py`. Después, hemos creado una nueva función en `analyze_eval.py` para que genere una tabla clasificando los tipos de trazabilidad y citas que presentan las respuestas.
+
+Para obtener de nuevo las respuestas hemos ejecutado el siguiente comando que ha generado automáticamente las tablas al terminar la inferencia:
+```
+make bench FIX=09 LABEL=updated_prompt_cites BRAINS="base rlm thinking"
+```
+
+**Qué pasó.** Como se puede observar en la siguiente tabla, el agente `thinking` falla una tarea más con este nuevo prompt. Sin embargo, esto puede deberse también a la estocasticidad del proceso de generación. En los casos borde, este agente presenta un 80% de éxito y sigue realizando correctamente todas las llamadas a las herramientas. Además, presenta un 93% de llamadas válidas que cumplen el formato.
+
+| Métrica | base | rlm | thinking |
+|---|---|---|---|
+| Éxito en las tareas principales | 3/20 (15 %) | 7/20 (35 %) | 13/20 (65 %) |
+| Aciertos casuales (lucky hits) | 1/20 (5 %) | 0/20 (0 %) | 1/20 (5 %) |
+| Éxito fiel (correcto y con las herramientas requeridas) | 0/20 (0 %) | 0/20 (0 %) | 1/20 (5 %) |
+| Llegan a final_answer | 19/20 (95 %) | 20/20 (100 %) | 20/20 (100 %) |
+| Casos de borde acertados | 0/5 (0 %) | 2/5 (40 %) | 4/5 (80 %) |
+| Pasos sin llamada válida | 3/25 (12 %) | 2/22 (9 %) | 2/29 (7 %) |
+| Llamadas leídas de la etiqueta tool_call | 21/22 (95 %) | 20/20 (100 %) | 27/27 (100 %) |
+| Llamadas leídas del respaldo Action | 1/22 (5 %) | 0/20 (0 %) | 0/27 (0 %) |
+| Cumplen el formato (llamada válida con etiqueta) | 21/25 (84 %) | 20/22 (91 %) | 27/29 (93 %) |
+| Respuestas vacías | 0/20 (0 %) | 0/20 (0 %) | 0/20 (0 %) |
+| Busca él mismo en la base de conocimiento (si la necesita) | 0/18 (0 %) | 0/18 (0 %) | 5/18 (28 %) |
+| Con búsqueda automática previa | 20/20 (100 %) | 20/20 (100 %) | 20/20 (100 %) |
+| Pasos medios | 1.2 | 1.1 | 1.4 |
+| Tokens medios | 6383 | 6026 | 8798 |
+
+La tabla de trazabilidad generada es la siguiente:
+| Clase | base | rlm | thinking |
+|---|---|---|---|
+| Correcto y trazable (citas válidas y de la evidencia) | 2/18 (11 %) | 2/18 (11 %) | 8/18 (44 %) |
+| Correcto pero sin ninguna cita | 0/18 (0 %) | 3/18 (17 %) | 0/18 (0 %) |
+| Correcto pero con citas inventadas (no devueltas por la búsqueda) | 0/18 (0 %) | 0/18 (0 %) | 0/18 (0 %) |
+| Correcto con citas válidas, pero no de la ficha que contiene la evidencia | 0/18 (0 %) | 0/18 (0 %) | 3/18 (17 %) |
+| Incorrecto y la evidencia nunca llegó al modelo (fallo del retriever) | 7/18 (39 %) | 7/18 (39 %) | 5/18 (28 %) |
+| Incorrecto aunque tenía la evidencia y la citó bien (fallo de cálculo o lectura) | 8/18 (44 %) | 2/18 (11 %) | 2/18 (11 %) |
+| Incorrecto, con la evidencia recuperada pero sin cita válida de ella | 1/18 (6 %) | 4/18 (22 %) | 0/18 (0 %) |
+| **Total** | 18/18 (100 %) | 18/18 (100 %) | 18/18 (100 %) |
+
+Como podemos observar, el agente con el cerebro `thinking` vuelve a presentar el mejor rendimiento.Éste devuelve la respuesta y la cita correctas en un 44% de las ocasiones, siendo un 28% de los fallos en la cita debidos a que el retriever no extrajo los chunks correctos. Por lo tanto, este no es un fallo de la capacidad del agente para citar.
+
+En un 17% de las ocasiones, el agente devuelve citas con un formato válido pero de fichas incorrectas y, en un 11% de los casos, la cita es la correcta pero el agente comete un fallo de cálculo o lectura
+
+**Qué concluimos.** Por lo tanto, el agente es capaz de citar con un formato válido y en casi la mitad de las tareas que le planteamos es capaz de obtener la respuesta correcta citando. La mayor causa de que falle la correctitud y la trazabilidad de la respuesta es debido a que el retriever no devuelve el chunk correcto (28%).
+
+Si revisamos el 17% de `thinking` con citas válidas pero de otra ficha podemos observar como son respuestas correctas pero que no se realizan llamadas a todos los medicamentos por lo que no citan todos los chunks que debería. Esto ocurre por ejemplo en la ficha t16.
+
+Otras posibles mejoras son:
+
+- **Mejorar el retriever** (es la causa principal en los tres cerebros: 39 %, 39 % y 28 %). Como el fallo es casi idéntico en `base` y `rlm`, no depende del modelo sino de la búsqueda. Se puede probar a aumentar `top_k` o a reformular la consulta antes de buscar. Que `thinking` falle menos (28 %) sugiere que reformular la consulta ayuda.
+- **Mejorar el prompt.** Se puede hacer un ejemplo que muestre como debe pensar el modelo en el caso de que le pidan información de más de un medicamento.
+
+Hay que interpretar estos resultados con cautela: con 18 tareas, una diferencia de una o dos tareas ya mueve el porcentaje entre 6 y 11 puntos, así que solo la distancia entre `thinking` y los otros dos cerebros es claramente significativa.
+
 ---
 
 ### 2026-11-18 · Proyecto final · Uso de herramientas con requires_confirmation=True
@@ -3200,5 +3285,3 @@ respuesta de confirmación de si quería la sheet o no. Sin embargo, luego pens�
 **Qué pasó.** Tras ejecutar algunas pruebas a través de la API hemos comprobado que el agente genera correctamente la preparation sheet cuando se le pide y no la genera cuando le decimos que no la queremos o cuando directamente no la mencionamos.
 
 **Qué concluimos.** Los cambios introducidos permiten que se ejecute la tool de create_preparation_sheet() que llevaba desde la fase 2 sin poder ejecutarse. Durante las pruebas hemos visto que hay casos en los que hay que llamar a herramientas y el agente no lo hace, pero eso no es la primera vez que ocurre y no era el objetivo de esta implementación.
-
----

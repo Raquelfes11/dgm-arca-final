@@ -19,7 +19,7 @@ import argparse
 import json
 from pathlib import Path
 
-from agent.evaluate import check_answer, summarise_brain
+from agent.evaluate import check_answer, summarise_brain, citation_report
 
 
 def rescore(results: dict, tasks: dict[str, dict], mode: str = "strict") -> dict:
@@ -38,7 +38,9 @@ def rescore(results: dict, tasks: dict[str, dict], mode: str = "strict") -> dict
                              "correct_lax": row.get("correct_lax", row.get("correct", False))})
                 continue
             answered = bool(row.get("succeeded"))
-            answer = row.get("final_answer") or ""
+            answer = row.get("final_answer") or "" 
+            correct = answered and check_answer(task, answer, mode)
+            report = citation_report(task, answer, row.get("steps"))
             rows.append(
                 {
                     **row,
@@ -46,7 +48,11 @@ def rescore(results: dict, tasks: dict[str, dict], mode: str = "strict") -> dict
                     "core": task.get("core", row.get("core", True)),
                     "correct_original": original,
                     "correct_lax": answered and check_answer(task, answer, "lax"),
-                    "correct": answered and check_answer(task, answer, mode),
+                    "correct": correct,
+                    "citations": report,
+                    "traceable":  None if report is None else bool(
+                        correct and report["citations_valid"] and report["evidence_cited"]
+                    )
                 }
             )
         rescored[brain] = summarise_brain(rows, result.get("config"))

@@ -72,6 +72,23 @@ FEW_SHOT_EXAMPLES = """
 Examples of the expected format. The drugs, passages and figures are illustrative only: never
 reuse them as facts, always rely on the passages returned by the knowledge base.
 
+Rules for citing (the examples follow them):
+- Every passage returned by the knowledge base starts with an id in square brackets, like
+  [a5f1572f18-0020], followed by the file name in parentheses. That id is the only valid citation.
+- Copy the id exactly as it appears in an Observation. Never invent, shorten or rewrite ids,
+  and never cite a file name alone.
+- Put the citation in square brackets at the end of the sentence that uses the data. To cite
+  several passages, separate the ids with a semicolon inside the same brackets:
+  [a5f1572f18-0020; b7c20d41e9-0004].
+- Every figure taken from a passage (dose per kg, concentration, interval, duration) must be
+  supported by a citation to the passage it comes from. A result calculated from those figures
+  cites the passage of its inputs.
+- Cite only passages that were returned in this conversation, and only if they contain the data
+  you used.
+- If the passages do not contain the information needed, do not answer from your own knowledge
+  and do not give a dose. Say explicitly that the information is not found in the knowledge base
+  and that the answer is not grounded, and cite only what the passages do say, if anything.
+
 ### Ejemplo 1
 Tarea: Un adulto de 80 kg recibe la dosis diaria habitual de amikacina según la ficha técnica.
 ¿Cuántos mg al día recibe?
@@ -82,20 +99,20 @@ conocimiento la dosis por kg indicada en la ficha técnica.
 {{"name": "search_knowledge_base", "arguments": {{"query": "posología diaria de amikacina en adultos mg/kg/día"}}}}
 </tool_call>
 
-Observation: [amikacina_31084.md] (amikacinaque.md) La dosis habitual es de 15 mg/kg/día, administrada en una o dos
+Observation: [a5f1572f18-0020] (amikacina_31947.md) La dosis habitual es de 15 mg/kg/día, administrada en una o dos
 dosis.
 
-Thought: La ficha indica 15 mg/kg/día. Para 80 kg debo multiplicar; uso la calculadora en lugar
-de hacerlo mentalmente.
+Thought: La ficha indica 15 mg/kg/día en el pasaje a5f1572f18-0020. Para 80 kg debo multiplicar;
+uso la calculadora en lugar de hacerlo mentalmente.
 <tool_call>
 {{"name": "dose_calculator", "arguments": {{"expression": "15 * 80"}}}}
 </tool_call>
 
 Observation: 1200
 
-Thought: Ya tengo el resultado y la fuente. Respondo citando el pasaje.
+Thought: Ya tengo el resultado y la fuente. Respondo citando el id exacto del pasaje.
 <tool_call>
-{{"name": "final_answer", "arguments": {{"answer": "El paciente recibe 1200 mg de amikacina al día (15 mg/kg/día × 80 kg), según la ficha técnica [amikacina_00001#3]."}}}}
+{{"name": "final_answer", "arguments": {{"answer": "El paciente recibe 1200 mg de amikacina al día (15 mg/kg/día × 80 kg) [a5f1572f18-0020]."}}}}
 </tool_call>
 
 ### Ejemplo 2
@@ -107,10 +124,10 @@ Thought: Necesito la velocidad inicial en la ficha técnica; la busco primero.
 {{"name": "search_knowledge_base", "arguments": {{"query": "velocidad inicial de perfusión de noradrenalina microgramos/kg/min"}}}}
 </tool_call>
 
-Observation: [noradrenalina_19830.md] (noradrenalina.md) La perfusión se inicia a 0,1 microgramos/kg/min.
+Observation: [3c9e0b72d4-0011] (noradrenalina_19830.md) La perfusión se inicia a 0,1 microgramos/kg/min.
 
-Thought: La velocidad está en microgramos/kg/min y me piden mg/h. Primero calculo microgramos/h:
-0,1 × 60 kg × 60 min.
+Thought: La velocidad está en microgramos/kg/min (pasaje 3c9e0b72d4-0011) y me piden mg/h.
+Primero calculo microgramos/h: 0,1 × 60 kg × 60 min.
 <tool_call>
 {{"name": "dose_calculator", "arguments": {{"expression": "0.1 * 60 * 60"}}}}
 </tool_call>
@@ -124,9 +141,9 @@ Thought: Son 360 microgramos/h. Convierto a mg con la herramienta de conversión
 
 Observation: 0.36
 
-Thought: El resultado es 0,36 mg/h. Respondo con la cita.
+Thought: El resultado es 0,36 mg/h. Respondo citando el id exacto del pasaje.
 <tool_call>
-{{"name": "final_answer", "arguments": {{"answer": "Recibe 0,36 mg/h de noradrenalina (0,1 microgramos/kg/min × 60 kg × 60 min = 360 microgramos/h) [noradrenalina_00002#1]."}}}}
+{{"name": "final_answer", "arguments": {{"answer": "Recibe 0,36 mg/h de noradrenalina (0,1 microgramos/kg/min × 60 kg × 60 min = 360 microgramos/h) [3c9e0b72d4-0011]."}}}}
 </tool_call>
 
 ### Ejemplo 3
@@ -137,7 +154,7 @@ Thought: Es una pregunta clínica sobre ajuste de dosis. Busco en la base de con
 {{"name": "search_knowledge_base", "arguments": {{"query": "ceftazidima ajuste de dosis insuficiencia hepática"}}}}
 </tool_call>
 
-Observation: [ceftazidima_013328.md] (ceftazidima.md) En pacientes con insuficiencia renal debe reducirse la dosis
+Observation: [e81d46a0b3-0013] (ceftazidima_13328.md) En pacientes con insuficiencia renal debe reducirse la dosis
 según el aclaramiento de creatinina.
 
 Thought: El pasaje habla de insuficiencia renal, no hepática. Reformulo la búsqueda una vez más.
@@ -145,13 +162,13 @@ Thought: El pasaje habla de insuficiencia renal, no hepática. Reformulo la bús
 {{"name": "search_knowledge_base", "arguments": {{"query": "ceftazidima pacientes con disfunción hepática"}}}}
 </tool_call>
 
-Observation: [ceftazidima_013984.md] (ceftazidima.md) No se dispone de datos sobre su uso en insuficiencia hepática
+Observation: [e81d46a0b3-0027] (ceftazidima_13328.md) No se dispone de datos sobre su uso en insuficiencia hepática
 grave.
 
 Thought: Los pasajes no responden a la pregunta sobre insuficiencia hepática. No debo contestar
-con mi propio conocimiento; lo indico.
+con mi propio conocimiento: indico que no está fundamentado y cito lo que sí dicen los pasajes.
 <tool_call>
-{{"name": "final_answer", "arguments": {{"answer": "Los pasajes recuperados no permiten responder: solo indican ajuste por insuficiencia renal [ceftazidima_00003#5] y señalan que no hay datos en insuficiencia hepática grave [ceftazidima_00003#7]."}}}}
+{{"name": "final_answer", "arguments": {{"answer": "No puedo dar una recomendación fundamentada: la base de conocimiento no contiene información sobre el ajuste de dosis en insuficiencia hepática grave. Solo indica ajuste por insuficiencia renal [e81d46a0b3-0013] y que no hay datos en insuficiencia hepática grave [e81d46a0b3-0027]."}}}}
 </tool_call>
 """
 
