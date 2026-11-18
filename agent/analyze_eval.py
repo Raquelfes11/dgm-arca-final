@@ -29,6 +29,7 @@ FAILURE_CLASSES = {
     "no_termina": "No llega a dar una respuesta (se agotan los pasos o no hay llamada válida)",
     "respuesta_vacia": "Llama a final_answer pero sin respuesta",
     "sin_herramientas": "Responde sin usar las herramientas necesarias",
+    "valor_sin_unidad": "El valor aparece pero sin la unidad correcta o fuera de la respuesta final (lucky hit)",
     "resultado_incorrecto": "Usa las herramientas necesarias pero el resultado es incorrecto",
 }
 
@@ -43,6 +44,8 @@ def classify_failure(row: dict) -> str | None:
         return "respuesta_vacia"
     if not row.get("required_tools_used", False):
         return "sin_herramientas"
+    if row.get("correct_lax"):
+        return "valor_sin_unidad"
     return "resultado_incorrecto"
 
 
@@ -61,6 +64,9 @@ def analyse_brain(rows: list[dict]) -> dict:
         kind = classify_failure(row)
         if kind:
             failures[kind] += 1
+    has_lax = bool(core) and all("correct_lax" in r for r in core)
+    traced = [r for r in core if r.get("traceable") is not None]
+    cites = [r["citations"] for r in traced]
     return {
         "n_core": len(core),
         "n_edge": len(edge),
@@ -82,6 +88,16 @@ def analyse_brain(rows: list[dict]) -> dict:
         "mean_steps": sum(r["n_steps"] for r in core) / len(core) if core else 0.0,
         "mean_tokens": sum(r["tokens_used"] for r in core) / len(core) if core else 0.0,
         "failures": failures,
+        "has_lax": has_lax,
+        "correct_lax": sum(bool(r.get("correct_lax")) for r in core) if has_lax else 0,
+        "lucky": sum(bool(r.get("correct_lax")) and not r["correct"] for r in core),
+        "n_traced": len(traced),
+        "traceable": sum(r["traceable"] for r in traced),
+        "cited": sum(c["cited"] for c in cites),
+        "invalid_cites": sum(bool(c["invalid_citations"]) for c in cites),
+        "evidence_retrieved": sum(c["evidence_retrieved"] for c in cites),
+        "evidence_cited": sum(c["evidence_cited"] for c in cites),
+        "correct_untraceable": sum(r["correct"] and not r["traceable"] for r in traced),
     }
 
 
@@ -96,11 +112,17 @@ def analyse(results: dict) -> dict:
 
 
 def _grid(results: dict) -> dict[str, dict[str, str]]:
-    """{task id: {brain: "OK" | "fallo"}}."""
+    """{task id: {brain: "OK" | "casual" | "fallo"}}."""
     grid: dict[str, dict[str, str]] = {}
     for brain, result in results.items():
         for row in result["rows"]:
-            grid.setdefault(row["id"], {})[brain] = "OK" if row["correct"] else "fallo"
+            if row["correct"]:
+                cell = "OK"
+            elif row.get("correct_lax"):
+                cell = "casual"
+            else:
+                cell = "fallo"
+            grid.setdefault(row["id"], {})[brain] = cell
     return dict(sorted(grid.items()))
 
 
@@ -111,6 +133,11 @@ def _pct(part: int, total: int) -> str:
 def _route_pct(metrics: dict, part: int, total: int) -> str:
     """A percentage of the call route metrics, or no data for reports made before they existed."""
     return _pct(part, total) if metrics["has_route"] else "sin dato"
+
+
+def _data_pct(available: bool, part: int, total: int) -> str:
+    """A percentage, or no data for reports made before the metric existed."""
+    return _pct(part, total) if available else "sin dato"
 
 
 def render(analysis: dict, grid: bool = True) -> str:
@@ -128,8 +155,14 @@ def render(analysis: dict, grid: bool = True) -> str:
 
     metrics = [
         ("Éxito en las tareas principales", lambda m: _pct(m["correct"], m["n_core"])),
+        ("Aciertos casuales (lucky hits)",
+         lambda m: _data_pct(m["has_lax"], m["lucky"], m["n_core"])),
         ("Éxito fiel (correcto y con las herramientas requeridas)",
          lambda m: _pct(m["faithful"], m["n_core"])),
+        ("Trazable (correcto, citas válidas y de la evidencia)",
+         lambda m: _data_pct(m["n_traced"] > 0, m["traceable"], m["n_traced"])),
+        ("Respuestas con citas inventadas (no devueltas por la búsqueda)",
+         lambda m: _data_pct(m["n_traced"] > 0, m["invalid_cites"], m["n_traced"])),
         ("Llegan a final_answer", lambda m: _pct(m["finished"], m["n_core"])),
         ("Casos de borde acertados", lambda m: _pct(m["edge_correct"], m["n_edge"])),
         ("Pasos sin llamada válida", lambda m: _pct(m["invalid_steps"], m["n_steps"])),

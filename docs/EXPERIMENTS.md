@@ -3187,4 +3187,30 @@ uv run python -m agent.rescore --report reports/fix/few_shot/fixfew_shot__eval.j
 
 **Qué concluimos.** Como se puede observar, el agente con el brain `thinking` obtiene un caso de éxito "falso". Es por eso que concluimos que hacer que la evaluación sea más estricta es necesaria para detectar casos que parecen correctos si no se revisan y para exigir también al agente que devuelva las unidades de la respuesta.
 
+Como podemos ver en la respuesta del agente para la tarea t11, este no sigue el formato de citas que utilizamos nosotras para mandarle la información de los chunks que puede tienen una semnántica similar a la query. Por ello, el siguiente paso será crear un chequeador de citas y modificar el prompt para ver si la citación del agente mejora.
+
+---
+
+### 2026-18-11 · Proyecto final · Chequea las citas devueltas por el agente
+
+**Qué queríamos saber.** Queremos ser capaces de evaluar las citas devueltas por el agente y mejorar su prompt para que los ejemplos del few shot reflejen verdaderamente como queremos que se vean las citas.
+
+**Qué hicimos.** Añadimos al fichero `agent/evaluate.py` dos funciones para obtener los chunks que el retriever obtiene y para ver si el agente devuelve uno de esos chunks y cuál.
+
+Para poder medir el rendimiento del mejor agente que tenemos por ahora (few shot desarrollado el 17-11-2026), añadimos los nuevos campos que se evaluan en los ficheros: `agent/rescore.py` para poder recalcular las métricas de evaluación sin tener que volver a ejecutar las pruebas; y `agent/analyze_eval.py` para que se genere la tabla con las nuevas filas. 
+
+A continuación, recalculamos las métricas:
+```
+uv run python -m agent.rescore --report reports/fix/few_shot/fixfew_shot__eval.json --out reports/fix/09/fix09_few_shot__eval.json
+```
+
+Y obtenemos las métricas con el siguiente comando:
+```
+uv run python -m agent.analyze_eval --report reports/fix/09/fix09_few_shot__eval.json
+```
+
+**Qué pasó.** Para el agente del 17-11-2026, obtenemos que su trazabilidad es del 0% y que se inventa un 89% de las citas. Este comportamiento no es tan malo como parece ya que si nos fijamos en las respuestas devueltas por el agente, éste sí está devolviendo las citas solo que en un formato distinto al esperado. Esto se debe a que el formato que se indica en los ejemplos del prompt que mandamos al LLM tienen un formato diferente al esperado.
+
+**Qué concluimos.** Para poder evaluar la capacidad de citación del agente, debemos actualizar los ejemplos de su prompt para que sigan el formato esperado por el chequeador.
+
 ---

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from agent.evaluate import automatic_tools, check_answer, number_values, summarise, tools_used
+from agent.evaluate import automatic_tools, check_answer, number_values, summarise, tools_used, citation_report
 from agent.validate_bench import BENCH, CORPUS, evaluate_expression, load_tasks, validate
 
 TOOLS = {
@@ -234,3 +234,22 @@ def test_citation_digits_do_not_count():
     answer = "El resultado es 12 [aciclovir_00002#25]."
     assert not check_answer(t(value=25, unitless=True), answer)
     assert check_answer(t(value=25, unitless=True), answer, mode="lax")
+
+def test_fabricated_citation_is_invalid():
+    steps = [{"action": {"name": "search_knowledge_base"},
+              "observation": "[0f15e47eed-0016] (dobutamina_85914.md)\nLa perfusión debe iniciarse..."}]
+    task = {"required_tools": ["search_knowledge_base"],
+            "evidence": [{"file": "dobutamina_85914.md", "text": "La perfusión debe iniciarse"}]}
+    bad = citation_report(task, "10,5 mg/h [dobutamina_00002#1]", steps)
+    assert not bad["citations_valid"] and bad["invalid_citations"] == ["dobutamina_00002#1"]
+    good = citation_report(task, "10,5 mg/h [0f15e47eed-0016]", steps)
+    assert good["citations_valid"] and good["evidence_cited"] and good["evidence_retrieved"]
+    assert not citation_report(task, "10,5 mg/h", steps)["cited"]
+
+def test_multiple_citations_in_one_bracket():
+    steps = [{"action": {"name": "search_knowledge_base"},
+              "observation": "[aa-0001] (a.md)\ntexto\n\n[bb-0002] (b.md)\ntexto"}]
+    task = {"required_tools": ["search_knowledge_base"],
+            "evidence": [{"file": "a.md", "text": "texto"}, {"file": "b.md", "text": "texto"}]}
+    report = citation_report(task, "Total 5 mg [aa-0001; bb-0002]", steps)
+    assert report["citations_valid"] and report["evidence_cited"]
