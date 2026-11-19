@@ -486,3 +486,130 @@ def test_from_env_switches_choose_the_tools():
         "final_answer", "search_knowledge_base"}
     assert set(ReActAgent.from_env(rag_mode="off", use_tools=False).registry.tools) == {
         "final_answer"}
+
+
+def test_requested_tool_not_called_is_reminded_once(monkeypatch, tmp_path):
+    """The task asks for the sheet and the model tries to finish without calling the tool: it is told
+    once, calls the tool and the answer is accepted. If it insists, the warning is added."""
+    import tool_use.tools as tools_module
+    from agent.react_agent import final_answer
+
+    monkeypatch.setattr(tools_module, "SHEETS_DIR", tmp_path)
+    sheet = dict(medication="X", concentration="10 mg/mL", dose="600 mg", administration="60 mL", steps="a")
+
+    def call(name, arguments):
+        return f'<tool_call>\n{json.dumps({"name": name, "arguments": arguments})}\n</tool_call>'
+
+    def make(script):
+        agent = ReActAgent(rag_mode="off")
+        agent.registry.register(final_answer)
+        agent._get_brain = lambda brain: (type("T", (), {"encode": lambda self, t: t.split()})(), None)
+        outputs = iter(script)
+        agent.generate = lambda messages, brain, thinking=None: next(outputs)
+        agent.summarize = lambda old, brain: "summary"
+        return agent
+
+    done = call("final_answer", {"answer": "Hoja generada en /tmp/x.pdf"})
+    agent = make([done, call("create_preparation_sheet", sheet), call("final_answer", {"answer": "Hecho."})])
+    response = agent.run("genera la hoja de preparación de X")
+    assert "no has" in response.steps[0].observation.lower()  # the reminder
+    assert list(tmp_path.glob("*.pdf")) and not response.warnings
+
+    agent = make([done, done])  # it insists: second time the answer is accepted, with the warning
+    response = agent.run("genera la hoja de preparación de X")
+    assert response.final_answer.startswith("AVISO") and response.warnings
+
+
+def test_concurrent_runs_do_not_mix_their_steps():
+    """POST /agent is served from threads and the agent is one object: two requests at the same
+    time must not write into each other's trace (a response showed steps of another run)."""
+    import threading
+    import time
+
+    from agent.react_agent import final_answer
+
+    agent = ReActAgent(rag_mode="off")
+    agent.registry.register(final_answer)
+    agent._get_brain = lambda brain: (type("T", (), {"encode": lambda self, t: t.split()})(), None)
+    agent.summarize = lambda old, brain: "summary"
+    calls: dict[str, int] = {}
+
+    def generate(messages, brain, thinking=None):
+        time.sleep(0.02)  # let the other thread run in between
+        task = next(m["content"] for m in messages if m["role"] == "user")
+        calls[task] = calls.get(task, 0) + 1
+        if calls[task] == 1:
+            return '<tool_call>\n{"name": "dose_calculator", "arguments": {"expression": "1 + 1"}}\n</tool_call>'
+        return '<tool_call>\n{"name": "final_answer", "arguments": {"answer": "answer-%s"}}\n</tool_call>' % task
+
+    agent.generate = generate
+    responses = {}
+
+    def run(task):
+        responses[task] = agent.run(task, max_steps=5, brain="base")
+
+    threads = [threading.Thread(target=run, args=(t,)) for t in ("A", "B")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    for task, response in responses.items():
+        answers = [s.action.arguments.get("answer") for s in response.steps if s.action and s.action.name == "final_answer"]
+        assert answers == [f"answer-{task}"], (task, [s.action.name for s in response.steps if s.action])
+        assert len(response.steps) == 2, (task, len(response.steps))
+
+
+def test_sheet_rules_only_in_prompt_of_runs_that_ask_for_the_sheet():
+    agent = ReActAgent(rag_mode="off")
+    assert "like a teacher" not in agent.system_prompt(5)
+    assert "like a teacher" in agent.system_prompt(5, sheet=True)
+    assert "like a teacher" in ReActAgent(rag_mode="off", few_shot=True).system_prompt(5, sheet=True)
+
+
+@pytest.mark.parametrize(
+    "task, asked",
+    [
+        ("Calcula 15 mg/kg para 40 kg y genera la hoja de preparación en PDF", True),
+        ("Necesito una hoja de preparación de la amikacina", True),
+        ("Hazme el PDF de la dilución", True),
+        ("Calcula la dosis, sin hoja de preparación", False),
+        ("No quiero la hoja de preparación, solo la dosis", False),
+        ("Calcula la dosis de paracetamol para 40 kg", False),
+        ("¿Qué es una hoja de preparación?", False),
+    ],
+)
+def test_requested_tools_reads_the_task(task, asked):
+    from agent.react_agent import requested_tools
+
+    assert ("create_preparation_sheet" in requested_tools(task)) is asked
+
+
+def test_sheet_runs_only_if_the_task_asked_for_it(monkeypatch, tmp_path):
+    """Asked in the task: it runs. Called by the model on its own: blocked, nothing is written."""
+    import tool_use.tools as tools_module
+
+    monkeypatch.setattr(tools_module, "SHEETS_DIR", tmp_path)
+    args = dict(medication="X", concentration="10 mg/mL", dose="600 mg", administration="60 mL", steps="a")
+    agent = ReActAgent(rag_mode="off")
+    agent._requested = set()
+    blocked = agent._call_tool("create_preparation_sheet", args)
+    assert not blocked.ok and blocked.requires_confirmation and not list(tmp_path.iterdir())
+    agent._requested = {"create_preparation_sheet"}
+    done = agent._call_tool("create_preparation_sheet", args)
+    assert done.ok and list(tmp_path.glob("*.pdf"))
+
+
+def test_preparation_sheet_steps_are_split_into_separate_lines():
+    from tool_use.tools import _split_steps
+
+    one_line = (
+        "Dosis total = peso del paciente (40 kg) x dosis por kg (15 mg/kg) = 600 mg. "
+        "Volumen por administración = 600 mg / 10 mg/mL = 60 mL."
+    )
+    assert _split_steps(one_line) == [
+        "Dosis total = peso del paciente (40 kg) x dosis por kg (15 mg/kg) = 600 mg.",
+        "Volumen por administración = 600 mg / 10 mg/mL = 60 mL.",
+    ]
+    assert _split_steps("a = 1; b = 2") == ["a = 1", "b = 2"]
+    assert _split_steps("Dosis: 0.5 mg/kg x 70 kg = 35 mg") == ["Dosis: 0.5 mg/kg x 70 kg = 35 mg"]  # decimal kept
+    assert _split_steps("uno\ndos\n\ntres") == ["uno", "dos", "tres"]

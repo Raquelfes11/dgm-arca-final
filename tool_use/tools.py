@@ -145,6 +145,21 @@ def dose_calculator(expression: str, decimals: int = 2) -> float:
     rounded = Fraction(math.floor(scaled + Fraction(1, 2)), 10**decimals)
     return float(-rounded if result < 0 else rounded)
 
+def _split_steps(steps: str) -> list[str]:
+    """One step per line. A model that writes them in one line still gets separate steps: they are
+    split at ";" and at a full stop followed by a capital letter ("... = 600 mg. Volumen = ...").
+    A decimal such as "0.5 mg" is not split: there is no space after its dot."""
+    if "\n" in steps:
+        parts = steps.splitlines()
+    else:
+        parts = [
+            piece
+            for chunk in steps.split(";")
+            for piece in re.split(r"(?<=\.)\s+(?=[A-ZÁÉÍÓÚÑ¿¡])", chunk)
+        ]
+    return [part.strip() for part in parts if part.strip()]
+
+
 @tool(requires_confirmation=True)
 def create_preparation_sheet(
     medication: str, concentration: str, dose: str, administration: str, steps: str
@@ -159,14 +174,15 @@ def create_preparation_sheet(
         concentration: Concentration or strength of the stock used, with unit, for example '10 mg/mL'.
         dose: Calculated dose, with unit, for example '1050 mg'.
         administration: Volume or rate to administer, with unit, for example '105 mL' or '21 mL/h'.
-        steps: Main calculation steps, one per line, for example '15 mg/kg x 70 kg = 1050 mg'.
+        steps: Calculation steps, one per line, each saying what is calculated, why, and the
+            operation, for example 'Dosis total = peso x dosis por kg: 70 kg x 15 mg/kg = 1050 mg'.
     """
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import getSampleStyleSheet
     from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
  
-    step_lines = [line.strip() for line in steps.splitlines() if line.strip()]
+    step_lines = _split_steps(steps)
     if not step_lines:
         raise ValueError("steps must contain at least one calculation step")
  
