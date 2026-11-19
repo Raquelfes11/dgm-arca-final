@@ -7,7 +7,7 @@ UV ?= uv
 # reports/fix/FIX/fixFIX_LABEL.json (mas el .md con las tablas), nunca en la linea base de la
 # fase 4. Las variables de entorno del agente se pasan en la misma orden, por ejemplo
 # make bench FIX=09 LABEL=sin_filtro ARCA_DRUG_FILTER=0
-BRAINS ?= thinking
+BRAINS ?= vllm
 RAG_MODE ?= auto
 MAX_STEPS ?= 10
 FEW_SHOT ?= True

@@ -1,6 +1,6 @@
 """Look at what the agent's summarizer does with a real search result.
 
-    uv run python -m agent.check_summary [brain ...]      # default: base thinking
+    uv run python -m agent.check_summary [brain ...]      # default: vllm
 
 For each brain it summarises a short history (one ``search_knowledge_base`` call with its real
 result) the way ``ConversationMemory.compress`` does, and prints the summary and the time. Then
@@ -25,7 +25,7 @@ def main() -> None:
     from agent.memory import ConversationMemory
     from agent.react_agent import ReActAgent
 
-    brains = sys.argv[1:] or ["base", "thinking"]
+    brains = sys.argv[1:] or ["vllm"]
     agent = ReActAgent.from_env()
     result = agent.registry.call("search_knowledge_base", {"query": QUESTION, "top_k": 5})
     observation = str(result.result)
