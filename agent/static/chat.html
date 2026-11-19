@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ARCA · chat</title>
+<style>
+:root{
+  --bg1:#eef2ff; --bg2:#fdf2f8; --card:#ffffff; --text:#1e1b4b; --muted:#6b7280;
+  --user1:#6366f1; --user2:#8b5cf6; --bot:#ffffff; --botborder:#e0e7ff; --accent:#14b8a6;
+  --code:#f1f5f9; --trace:#faf5ff; --tracebd:#e9d5ff; --warn:#fff7ed; --warnbd:#fdba74;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg1:#0f172a; --bg2:#1e1b4b; --card:#1e293b; --text:#e2e8f0; --muted:#94a3b8;
+  --bot:#1e293b; --botborder:#334155; --code:#0f172a; --trace:#2e1065; --tracebd:#5b21b6;
+  --warn:#431407; --warnbd:#9a3412;}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--text);
+  background:linear-gradient(135deg,var(--bg1),var(--bg2));display:flex;flex-direction:column}
+header{display:flex;align-items:center;gap:12px;padding:12px 24px;color:#fff;
+  background:linear-gradient(90deg,#6366f1,#8b5cf6 55%,#ec4899);box-shadow:0 2px 12px #0003}
+header h1{font-size:18px;margin:0;flex:1;font-weight:650}
+header h1 small{font-weight:400;opacity:.8;margin-left:8px}
+header select,header input[type=number],header button,header label{font:inherit;font-size:13px}
+header select,header input[type=number]{border:0;border-radius:8px;padding:5px 8px;background:#ffffff30;color:#fff}
+header select option{color:#000}
+header input[type=number]{width:56px}
+header label{display:flex;align-items:center;gap:6px;opacity:.95}
+header button{border:0;border-radius:8px;padding:6px 12px;background:#ffffff30;color:#fff;cursor:pointer}
+header button:hover{background:#ffffff50}
+#chat{flex:1;overflow-y:auto;padding:24px clamp(12px,5vw,80px);display:flex;flex-direction:column;gap:14px;scroll-behavior:smooth}
+.row{display:flex;gap:10px;align-items:flex-end;max-width:100%}
+.row.user{justify-content:flex-end}
+.avatar{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;font-size:18px;flex:none;
+  background:linear-gradient(135deg,#14b8a6,#06b6d4);box-shadow:0 2px 6px #0003}
+.bubble{max-width:min(78%,900px);padding:10px 15px;border-radius:18px;word-wrap:break-word;overflow-wrap:anywhere;
+  box-shadow:0 1px 4px #0002}
+.user .bubble{background:linear-gradient(135deg,var(--user1),var(--user2));color:#fff;border-bottom-right-radius:4px;white-space:pre-wrap}
+.bot .bubble{background:var(--bot);border:1px solid var(--botborder);border-left:4px solid var(--accent);border-bottom-left-radius:4px}
+.bubble p{margin:.3em 0}.bubble ul,.bubble ol{margin:.3em 0;padding-left:1.4em}
+.bubble code{background:var(--code);padding:1px 5px;border-radius:5px;font-size:.9em}
+.bubble pre{background:var(--code);padding:10px;border-radius:10px;overflow-x:auto;margin:.5em 0}
+.bubble pre code{padding:0;background:none}
+.bubble a{color:#6366f1}
+.warn{margin-top:8px;padding:6px 10px;border-radius:8px;background:var(--warn);border:1px solid var(--warnbd);font-size:.9em}
+details{margin-bottom:8px;border:1px solid var(--tracebd);background:var(--trace);border-radius:12px;padding:6px 12px}
+summary{cursor:pointer;font-weight:600;color:#8b5cf6;font-size:.9em}
+.step{margin:8px 0;padding-left:10px;border-left:3px solid #c4b5fd}
+.step b{display:block;font-size:.85em}
+.thought{color:#7c3aed}.action{color:#ea580c}.obs{color:#16a34a}
+.step pre{font-size:.82em;max-height:220px;margin:4px 0}
+.dots span{display:inline-block;width:8px;height:8px;margin:0 2px;border-radius:50%;background:var(--accent);animation:b 1.2s infinite}
+.dots span:nth-child(2){animation-delay:.15s}.dots span:nth-child(3){animation-delay:.3s}
+@keyframes b{0%,60%,100%{transform:translateY(0);opacity:.4}30%{transform:translateY(-6px);opacity:1}}
+#empty{margin:auto;text-align:center;color:var(--muted)}#empty h2{font-size:28px;margin:0 0 6px;color:var(--text)}
+form{display:flex;gap:10px;padding:14px clamp(12px,5vw,80px) 20px}
+textarea{flex:1;resize:none;border:2px solid var(--botborder);border-radius:16px;padding:12px 16px;font:inherit;
+  background:var(--card);color:var(--text);max-height:160px;outline:none;box-shadow:0 2px 8px #0001}
+textarea:focus{border-color:var(--user1)}
+#send{border:0;border-radius:16px;padding:0 24px;font:inherit;font-weight:600;color:#fff;cursor:pointer;
+  background:linear-gradient(135deg,var(--user1),#ec4899);box-shadow:0 2px 8px #0003}
+#send:disabled{opacity:.5;cursor:wait}
+</style>
+</head>
+<body>
+<header>
+  <h1>🤖 ARCA<small>chat con el agente</small></h1>
+  <label>Cerebro <select id="brain"><option>rlm</option><option>base</option><option>thinking</option></select></label>
+  <label>Pasos <input id="steps" type="number" min="1" max="30" value="10"></label>
+  <label><input id="trace" type="checkbox" checked> Razonamiento</label>
+  <button id="clear" type="button">🗑️ Nueva</button>
+</header>
+<div id="chat"><div id="empty"><h2>👋 ¿En qué te ayudo?</h2>Escribe tu pregunta abajo.</div></div>
+<form id="form">
+  <textarea id="box" rows="1" placeholder="Escribe tu pregunta… (Enter envía, Shift+Enter salto de línea)" autofocus></textarea>
+  <button id="send">Enviar ➤</button>
+</form>
+<script>
+const $=id=>document.getElementById(id), chat=$('chat'), box=$('box'), send=$('send');
+let history=[];  // [{q,a}]
+const esc=s=>s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function md(src){
+  const blocks=[]; let t=esc(src).replace(/```[a-z]*\n?([\s\S]*?)```/g,(_,c)=>{blocks.push(c);return '\u0000'+(blocks.length-1)+'\u0000'});
+  t=t.replace(/`([^`\n]+)`/g,'<code>$1</code>').replace(/\*\*([^*\n]+)\*\*/g,'<b>$1</b>')
+     .replace(/(^|[\s(])_([^_\n]+)_(?=[\s).,;:]|$)/g,'$1<i>$2</i>')
+     .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>')
+     .replace(/^#{1,4} (.+)$/gm,'<b>$1</b>');
+  const out=[]; let list=null;
+  for(const line of t.split('\n')){
+    const m=line.match(/^\s*(?:[-*]|\d+\.) (.+)/);
+    if(m){ if(!list){list=[];} list.push(m[1]); continue }
+    if(list){out.push('<ul>'+list.map(x=>'<li>'+x+'</li>').join('')+'</ul>');list=null}
+    out.push(line.trim()?'<p>'+line+'</p>':'');
+  }
+  if(list)out.push('<ul>'+list.map(x=>'<li>'+x+'</li>').join('')+'</ul>');
+  return out.join('').replace(/\u0000(\d+)\u0000/g,(_,i)=>'<pre><code>'+blocks[i]+'</code></pre>');
+}
+function add(role,html){
+  $('empty')?.remove();
+  const r=document.createElement('div'); r.className='row '+role;
+  r.innerHTML=(role==='bot'?'<div class="avatar">🤖</div>':'')+'<div class="bubble">'+html+'</div>';
+  chat.appendChild(r); chat.scrollTop=chat.scrollHeight; return r.querySelector('.bubble');
+}
+function traceHtml(steps){
+  return '<details><summary>🧠 Razonamiento · '+steps.length+' pasos</summary>'+steps.map((s,i)=>
+    '<div class="step"><b>Paso '+(i+1)+(s.automatic?' (automático)':'')+'</b>'+
+    (s.thought?'<div class="thought">💭 '+esc(s.thought)+'</div>':'')+
+    (s.action?'<b class="action">🔧 Acción</b><pre><code>'+esc(JSON.stringify(s.action,null,2))+'</code></pre>':'')+
+    (s.observation!=null?'<b class="obs">👁️ Observación</b><pre><code>'+esc(String(s.observation).slice(0,1500))+'</code></pre>':'')+
+    '</div>').join('')+'</details>';
+}
+async function submit(e){
+  e&&e.preventDefault(); const q=box.value.trim(); if(!q||send.disabled)return;
+  box.value=''; box.style.height='auto'; send.disabled=true;
+  add('user',esc(q));
+  const b=add('bot','<span class="dots"><span></span><span></span><span></span></span>');
+  try{
+    const H={'Content-Type':'application/json','ngrok-skip-browser-warning':'1'};
+    const parse=async r=>{const t=await r.text();try{return JSON.parse(t)}catch{throw new Error('El servidor devolvió HTML en vez de JSON (HTTP '+r.status+'). Si usas ngrok, recarga la página y pulsa "Visit Site"; si ves aquí el swagger de la API, el túnel apunta al puerto 8000.')}};
+    const r0=await fetch('chat',{method:'POST',headers:H,body:JSON.stringify(
+      {message:q,history,brain:$('brain').value,max_steps:+$('steps').value||10})});
+    const j=await parse(r0); if(!r0.ok||!j.job_id) throw new Error(j.error||r0.status);
+    let r,d;
+    for(;;){
+      await new Promise(f=>setTimeout(f,2500));
+      try{r=await fetch('chat/'+j.job_id,{headers:H}); d=await parse(r);}catch(e){ if(e instanceof TypeError) continue; throw e; }
+      if(d.state!=='running') break;
+    }
+    if(!r.ok) throw new Error(d.error||r.status);
+    let h=($('trace').checked&&d.steps?.length)?traceHtml(d.steps):'';
+    h+=md(d.final_answer||'(respuesta vacía)');
+    (d.warnings||[]).forEach(w=>h+='<div class="warn">⚠️ '+esc(w)+'</div>');
+    b.innerHTML=h; history.push({q,a:d.final_answer||''});
+  }catch(err){ b.innerHTML='⚠️ '+esc(String(err.message||err)); }
+  send.disabled=false; chat.scrollTop=chat.scrollHeight; box.focus();
+}
+$('form').addEventListener('submit',submit);
+box.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();submit()}});
+box.addEventListener('input',()=>{box.style.height='auto';box.style.height=box.scrollHeight+'px'});
+$('clear').onclick=()=>{history=[];chat.innerHTML='<div id="empty"><h2>👋 ¿En qué te ayudo?</h2>Escribe tu pregunta abajo.</div>';box.focus()};
+</script>
+</body>
+</html>
