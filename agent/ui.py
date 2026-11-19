@@ -65,7 +65,7 @@ def build_task(message: str, history: list[dict]) -> str:
 class ChatRequest(BaseModel):
     message: str
     history: list[dict] = []
-    brain: str = "rlm"
+    brain: str = "vllm"
     max_steps: int = 10
 
 
