@@ -280,7 +280,7 @@ def main() -> None:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--bench", default="agent/bench/tasks.jsonl")
-    parser.add_argument("--brains", nargs="+", default=["rlm"])
+    parser.add_argument("--brains", nargs="+", default=["vllm"])
     parser.add_argument("--ids", nargs="+", default=None, help="run only these task ids")
     parser.add_argument("--max-steps", type=int, default=10)
     parser.add_argument("--out", default="reports/phase4/phase4_eval.json")

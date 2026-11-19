@@ -512,7 +512,7 @@ class ReActAgent:
             return f"{BRAINS['base']()} + {BRAINS['rlm']()}"
         return BRAINS["base"]()
 
-    def run(self, task: str, max_steps: int = 10, brain: str = "rlm") -> AgentResponse:
+    def run(self, task: str, max_steps: int = 10, brain: str = "vllm") -> AgentResponse:
         """What ``POST /agent`` calls: runs the loop and fills in ``model`` and ``tokens_used``."""
         with self._lock:
             self._tokens_used = 0
