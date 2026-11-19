@@ -1,7 +1,7 @@
 """The ReAct agent: Thought -> Action -> Observation, in a loop, with every tool you built.
 
 This is where phases 1 to 3 meet. The brain is a model (``brain="base"``, your phase-1
-RLM with ``brain="rlm"``, or a thinking model with ``brain="thinking"``); the hands are the
+RLM with ``brain="rlm"``, a thinking model with ``brain="thinking"``, or the remote vLLM model with ``brain="vllm"``); the hands are the
 phase-2 registry plus ``search_knowledge_base`` from phase 3; the loop is yours to write.
 
 ``ReActAgent.run`` is what ``POST /agent`` calls. Until it is implemented the endpoint
@@ -42,7 +42,8 @@ load_dotenv()
 
 RETRIEVER = "hybrid"
 LAMBDA_BM25 = 0.4  # best MRR in the λ sweep with recursive chunking (EXPERIMENTS.md)
-MAX_NEW_TOKENS = 1024
+MAX_NEW_TOKENS = 1024  # local brains (transformers)
+MAX_NEW_TOKENS_VLLM = 4096  # remote vLLM server
 # Per tool call. Measured in reports/agent_tool_latency.json (see EXPERIMENTS.md, 2026-11-03):
 # normal calls take at most ~1.1 s, the first search (builds the retriever) ~12 s, and CIMA
 # gives up by itself after 15 s. 30 s leaves ~2.5x margin over the slowest of those.
@@ -246,7 +247,24 @@ BRAINS = {
     "base": lambda: os.environ.get("ARCA_RLM_BASE_MODEL", "Qwen/Qwen3-0.6B"),
     "rlm": lambda: os.environ.get("ARCA_RLM_ADAPTER", ""),
     "thinking": lambda: os.environ.get("ARCA_THINKING_MODEL", "Qwen/Qwen3-1.7B"),
+    # Remote model served by vLLM (OpenAI-compatible API). The name is discovered with /models
+    # unless VLLM_MODEL is set.
+    "vllm": lambda: os.environ.get("VLLM_MODEL", "vllm"),
 }
+
+
+def _vllm_client():
+    """httpx client for the vLLM server, configured from the .env (VLLM_API_KEY, VLLM_BASE_URL)."""
+    import httpx
+
+    key = os.environ.get("VLLM_API_KEY")
+    if not key:
+        raise RuntimeError("brain='vllm' needs VLLM_API_KEY in the .env")
+    return httpx.Client(
+        base_url=os.environ.get("VLLM_BASE_URL", "http://0.0.0.0:8001/v1").rstrip("/"),
+        headers={"Authorization": f"Bearer {key}"},
+        timeout=300,
+    )
 
 
 def _resolve_adapter() -> str:
@@ -316,6 +334,8 @@ class ReActAgent:
     def _get_brain(self, brain: str):
         if brain not in BRAINS:
             raise ValueError(f"brain must be one of {sorted(BRAINS)}, got {brain!r}")
+        if brain == "vllm":
+            return None, None  # nothing local: the model lives behind the vLLM server
         if brain not in self._models:
             adapter = _resolve_adapter() if brain == "rlm" else None  # fail before loading anything
             import torch
@@ -357,6 +377,8 @@ class ReActAgent:
 
         ``thinking`` forces the chat template flag; by default only ``base`` does not think.
         """
+        if brain == "vllm":
+            return self._generate_vllm(messages, thinking)
         import torch
 
         tokenizer, model = self._get_brain(brain)
@@ -380,6 +402,54 @@ class ReActAgent:
             )
         self._tokens_used += int(out.shape[1])  # prompt + generated tokens of this call
         return tokenizer.decode(out[0, inputs["input_ids"].shape[1]:], skip_special_tokens=True)
+
+    def _vllm_model(self) -> str:
+        """The served model name: VLLM_MODEL, or the first one the server lists (cached)."""
+        name = BRAINS["vllm"]()
+        if name == "vllm":
+            if "vllm" not in self._models:
+                r = _vllm_client().get("/models")
+                r.raise_for_status()
+                self._models["vllm"] = r.json()["data"][0]["id"]
+            name = self._models["vllm"]
+        return name
+
+    def _generate_vllm(self, messages: list[dict], thinking: bool | None = None) -> str:
+        """One generation against the vLLM server. Same contract as the local ``generate``.
+
+        It uses ``/completions`` with the ChatML prompt written by hand, not
+        ``/chat/completions``: the server's chat endpoint parses ``<tool_call>`` blocks and
+        reasoning on its own and leaves ``content`` empty (``tool_calls`` too, because we send
+        no ``tools``), so the agent never saw the model's calls. Written like the Qwen template
+        does it: a ``tool`` message is a user turn with ``<tool_response>``. The model opens its
+        own ``<think>``, as the local brains do; with ``thinking=False`` the prompt ends with an
+        empty closed block instead.
+        """
+        parts = []
+        for m in messages:
+            if m["role"] == "tool":
+                parts.append(f"<|im_start|>user\n<tool_response>\n{m['content']}\n</tool_response><|im_end|>\n")
+            else:
+                parts.append(f"<|im_start|>{m['role']}\n{m['content']}<|im_end|>\n")
+        think = "" if thinking is None or thinking else "<think>\n\n</think>\n\n"
+        r = _vllm_client().post(
+            "/completions",
+            json={
+                "model": self._vllm_model(),
+                "prompt": "".join(parts) + "<|im_start|>assistant\n" + think,
+                "temperature": 0,
+                "max_tokens": MAX_NEW_TOKENS_VLLM,
+                "stop": ["</tool_call>"],  # same reason as in the local generate
+            },
+        )
+        r.raise_for_status()
+        data = r.json()
+        self._tokens_used += int(data.get("usage", {}).get("total_tokens", 0))
+        choice = data["choices"][0]
+        text = choice["text"]
+        if choice.get("finish_reason") == "stop" and "<tool_call>" in text and "</tool_call>" not in text:
+            text += "</tool_call>"  # vLLM strips the stop string from the output
+        return text
 
     def _call_tool(self, name: str, arguments: dict) -> ToolCallRecord:
         """Run one tool call with a time limit. Never raises: a failure comes back as a record.
@@ -434,6 +504,8 @@ class ReActAgent:
 
     def _model_label(self, brain: str) -> str:
         """Which model answered, written like ``/rag`` does: base model (+ adapter)."""
+        if brain == "vllm":
+            return self._vllm_model()
         if brain == "thinking":
             return BRAINS["thinking"]()
         if brain == "rlm":
@@ -482,6 +554,8 @@ class ReActAgent:
         tokenizer, _ = self._get_brain(brain)
 
         def count_tokens(text: str) -> int:
+            if tokenizer is None:  # remote model: no local tokenizer, ~3.5 characters per token
+                return int(len(text) / 3.5) + 1
             return len(tokenizer.encode(text))
 
         memory = ConversationMemory(
