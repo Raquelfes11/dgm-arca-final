@@ -88,6 +88,8 @@ Rules for citing (the examples follow them):
 - If the passages do not contain the information needed, do not answer from your own knowledge
   and do not give a dose. Say explicitly that the information is not found in the knowledge base
   and that the answer is not grounded, and cite only what the passages do say, if anything.
+- If the task involves several drugs, search for each drug separately (one search per data
+  sheet) and cite at least one passage from each data sheet.
 
 ### Ejemplo 1
 Tarea: Un adulto de 80 kg recibe la dosis diaria habitual de amikacina según la ficha técnica.
@@ -169,6 +171,44 @@ Thought: Los pasajes no responden a la pregunta sobre insuficiencia hepática. N
 con mi propio conocimiento: indico que no está fundamentado y cito lo que sí dicen los pasajes.
 <tool_call>
 {{"name": "final_answer", "arguments": {{"answer": "No puedo dar una recomendación fundamentada: la base de conocimiento no contiene información sobre el ajuste de dosis en insuficiencia hepática grave. Solo indica ajuste por insuficiencia renal [e81d46a0b3-0013] y que no hay datos en insuficiencia hepática grave [e81d46a0b3-0027]."}}}}
+</tool_call>
+
+### Ejemplo 4
+Tarea: Un paciente de 60 kg recibe ciprofloxacino intravenoso y metronidazol intravenoso con la
+pauta de la ficha técnica. ¿Cuántos mg de antibiótico suma en total en un día?
+
+Thought: La tarea menciona dos fármacos y cada uno tiene su propia ficha. Busco cada uno por
+separado, para tener un pasaje de cada ficha que pueda citar. Empiezo por el ciprofloxacino.
+<tool_call>
+{{"name": "search_knowledge_base", "arguments": {{"query": "ciprofloxacino intravenoso posología adultos mg cada 12 horas"}}}}
+</tool_call>
+
+Observation: [7d20c9e4a1-0006] (ciprofloxacino_40217.md) La dosis recomendada por vía intravenosa en adultos es de
+400 mg cada 12 horas.
+
+Thought: Del ciprofloxacino tengo 400 mg cada 12 horas en el pasaje 7d20c9e4a1-0006. Todavía me
+falta el metronidazol, que está en otra ficha: hago una segunda búsqueda con su nombre, en lugar
+de suponer su dosis.
+<tool_call>
+{{"name": "search_knowledge_base", "arguments": {{"query": "metronidazol intravenoso posología adultos mg/kg cada 8 horas"}}}}
+</tool_call>
+
+Observation: [91b3f6c05e-0012] (metronidazol_28845.md) La dosis intravenosa es de 7,5 mg/kg de peso corporal cada 8
+horas.
+
+Thought: Ya tengo las dos pautas, cada una en su pasaje. Ciprofloxacino: 400 mg × 2 dosis al día.
+Metronidazol: 7,5 mg/kg × 60 kg × 3 dosis al día. Lo calculo todo en una sola expresión con la
+calculadora.
+<tool_call>
+{{"name": "dose_calculator", "arguments": {{"expression": "400 * 2 + 7.5 * 60 * 3"}}}}
+</tool_call>
+
+Observation: 2150
+
+Thought: El total es 2150 mg. Cito un pasaje de cada ficha, con los ids exactos de las dos
+búsquedas.
+<tool_call>
+{{"name": "final_answer", "arguments": {{"answer": "El paciente recibe un total de 2150 mg de antibiótico al día: 800 mg de ciprofloxacino (400 mg × 2 dosis) [7d20c9e4a1-0006] y 1350 mg de metronidazol (7,5 mg/kg × 60 kg × 3 dosis) [91b3f6c05e-0012]."}}}}
 </tool_call>
 """
 
