@@ -13,7 +13,7 @@ Una tarea por línea, en JSON:
 | Campo | Para qué sirve |
 |---|---|
 | `id` | `t01`…`t25`; se pasa a `--ids` para repetir solo algunas |
-| `category` | `ficha_calculo`, `ficha_conversion`, `cima_calculo`, `dos_fichas`, `larga` (principales) y `fuera_del_corpus`, `herramienta_bloqueada`, `herramienta_con_error` (borde) |
+| `category` | `ficha_calculo`, `ficha_conversion`, `cima_calculo`, `dos_fichas`, `larga` (principales) y `fuera_del_corpus`, `hoja_preparacion`, `herramienta_con_error` (borde) |
 | `core` | `false` en las de borde; si falta, vale `true` |
 | `task` | La pregunta, tal como la escribiría un estudiante |
 | `required_tools` | Herramientas que tiene que usar para resolverla bien (`evaluate` anota si las usó) |
@@ -48,7 +48,7 @@ Una tarea por línea, en JSON:
 * **t19, t20** (`larga`): tres y cuatro cálculos seguidos en la misma pregunta; ponen a
   prueba la memoria y el límite de pasos.
 * **t21–t25** (borde): medicamento que no está en el corpus (t21, t22), hoja PDF que el agente
-  tiene que rechazar por pedir confirmación (t23), conversión imposible (t24) y medicamento
+  tiene que generar y cuya ruta debe citar (t23), conversión imposible (t24) y medicamento
   que no existe en CIMA (t25). Acierta quien reconoce que no puede, no quien inventa.
 
 ## Cómo se usa
@@ -103,7 +103,10 @@ las fichas y una cifra puede cambiar.
   mirad también cuántas veces usó las herramientas que debía.
 * t14 y t15 dependen de la API de CIMA: sin red o con un cambio en la ficha pueden fallar
   por motivos ajenos al agente.
-* Ninguna tarea se puede resolver con `create_preparation_sheet`, porque el agente la
-  bloquea siempre (necesita confirmación). t23 mide justo eso.
+* `create_preparation_sheet` tiene efectos secundarios: el agente solo la ejecuta si la tarea la
+  pide de forma explícita, y t23 la pide. t23 mide que la genere y cite la ruta real del PDF;
+  la versión anterior, en la que la hoja se bloqueaba, ya no se mide.
+* En t21 y t22 el `check` rechaza que la respuesta dé una cifra, pero acepta cifras entre
+  comillas (t21): el agente puede citar lo que buscó ("omeprazol 40 mg") sin que cuente como dosis.
 * Las dosis son las de las fichas descargadas el día de la descarga, con pesos y
   concentraciones inventados. Es un banco para comparar cerebros, no una referencia clínica.

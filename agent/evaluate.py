@@ -6,7 +6,7 @@ number, a substring, a regex, or several of them). Twenty tasks that need at lea
 the minimum; tasks with "core": false are edge cases (impossible, blocked or broken tools)
 that are reported apart. Run every brain::
 
-    uv run python -m agent.evaluate --bench agent/bench/tasks.jsonl --brains base rlm thinking
+    uv run python -m agent.evaluate --bench agent/bench/tasks.jsonl --brains base rlm thinking vllm
 
 and put the resulting table in your report next to the JSON-vs-code-agent comparison.
 Before the first run, uv run python -m agent.validate_bench checks the benchmark itself.
@@ -280,7 +280,7 @@ def main() -> None:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--bench", default="agent/bench/tasks.jsonl")
-    parser.add_argument("--brains", nargs="+", default=["rlm"])
+    parser.add_argument("--brains", nargs="+", default=["vllm"])
     parser.add_argument("--ids", nargs="+", default=None, help="run only these task ids")
     parser.add_argument("--max-steps", type=int, default=10)
     parser.add_argument("--out", default="reports/phase4/phase4_eval.json")
@@ -305,6 +305,8 @@ def main() -> None:
     from dotenv import load_dotenv
 
     load_dotenv()  # ARCA_RLM_ADAPTER and the model ids live in each teammate's .env
+
+    import httpx
 
     from agent.react_agent import ReActAgent
 
@@ -351,7 +353,7 @@ def main() -> None:
                     f"{'OK' if ok_ans else 'fail'} ({response['n_steps']} steps)",
                     flush=True,
                 )
-        except (ValueError, OSError) as error:  # e.g. the rlm adapter is not configured
+        except (ValueError, OSError, RuntimeError, httpx.HTTPError) as error:  # e.g. no rlm adapter, no vLLM key or server
             print(f"[{brain}] skipped: {error}", flush=True)
             results[brain] = {"error": f"{type(error).__name__}: {error}", "rows": rows}
             out.write_text(json.dumps(results, indent=2, ensure_ascii=False, default=list))

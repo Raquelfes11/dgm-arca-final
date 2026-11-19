@@ -3344,3 +3344,60 @@ Por último, podemos ver cómo ahora el modelo cita bien en un 67% de los casos 
 **Qué concluimos.** Con estos resultados determinamos que el ejemplo añadido al prompt del agente mejora su rendimiento por lo que decidimos seguir adelante con este prompt.
 
 --
+
+### 2026-11-19 · Proyecto final · vLLM de inferencia como agente
+
+**Qué queríamos saber.** Queríamos ver si el rendimiento mejoraba cambiando el agente del modelo Qwen/Qwen3-1.7B (nuestro `thinking`) que era el que mejor nos funcionaba hasta el momento por el vLLM de inferencia desplegado en la DGX, que sirve el modelo `qwen3.8-27b-fp8`.
+
+**Qué hicimos.** Modificamos el `react_agent.py` para que si le indicábamos que usara el servicio de inferencia llamara a la API para hacer las consultas. Le hacemos peticiones POST a través del endpoint `/completions` para poder pasarle el prompt que le pasamos al resto de modelos ejecutados en local. También tuvimos que modificar el bench porque había preguntas que daban falsos negativos (t21 y t23) ya que en el caso de la primera la respuesta que daba el modelo era correcta pero la expresión que usaba no estaba contemplada en el regex y en el caso de la segunda, se diseñó cuando la generación de hojas de preparación no estaba implementada así que esperaba que el modelo dijera que la herramienta no está disponible o que estaba bloqueada. Ahora sí está implementada y se ejecuta así que se espera que diga que se generó la hoja correctamente además de devolver el resultado. Por el mismo motivo que t21 se amplió el regex de t22 y t25 (se añadió `podido`) y la categoría de t23 pasó de `herramienta_bloqueada` a `hoja_preparacion`. Los cambios del bench se aplican igual a los cuatro cerebros y se han vuelto a ejecutar todos.
+
+Para obtener de nuevo las respuestas del agente hemos ejecutado el siguiente comando que ha generado automáticamente las tablas al terminar la inferencia:
+```
+make bench FIX=vllm LABEL=vllm_added_for_comparison BRAINS="base rlm thinking vllm"
+```
+
+**Qué pasó.** Como se puede observar en esta primera tabla, el rendimiento del cerebro `vllm` presenta mejores resultados respecto a los demás (resultados perfectos). Además, se siguen sin cometer lucky hits. El único cerebro que no llama a todas las herramientas con la etiqueta de `<tool_call>` es base. Todas las llamadas válidas del resto de cerebros siguen la convención, aunque `thinking` tiene un 18 % de pasos sin llamada válida y `rlm` un 5 %. Sin embargo, el `vllm` obtiene un éxito fiel del 85%. Analizando las trazas de razonamiento vemos que esas 3 preguntas son t12, t14 y t15. En el caso de t12 es porque para que la dé por buena pide que se use convert_units y el cerebro llama a dose_calculator. Sin embargo, parece un falso negativo porque lo que queremos es que no haga los cálculos de cabeza y no los está haciendo. t14 y t15 no salen como éxito fiel porque en required_tools tienen search_medication_cima y no llaman a esa herramienta. Sin embargo, vemos que los datos que usan para responder vienen de la llamada a search_knowledge_base que se realiza por defecto. Dado que la base de datos se formó con datos de CIMA, se podría considerar que llamar a la API de CIMA es innecesario. En ningún caso se inventa los datos.
+
+| Métrica | base | rlm | thinking | vllm |
+|---|---|---|---|---|
+| Éxito en las tareas principales | 6/20 (30 %) | 9/20 (45 %) | 14/20 (70 %) | 20/20 (100 %) |
+| Aciertos casuales (lucky hits) | 0/20 (0 %) | 0/20 (0 %) | 0/20 (0 %) | 0/20 (0 %) |
+| Éxito fiel (correcto y con las herramientas requeridas) | 1/20 (5 %) | 0/20 (0 %) | 4/20 (20 %) | 17/20 (85 %) |
+| Llegan a final_answer | 20/20 (100 %) | 20/20 (100 %) | 19/20 (95 %) | 20/20 (100 %) |
+| Casos de borde acertados | 0/5 (0 %) | 2/5 (40 %) | 3/5 (60 %) | 5/5 (100 %) |
+| Pasos sin llamada válida | 0/22 (0 %) | 1/21 (5 %) | 6/34 (18 %) | 0/53 (0 %) |
+| Llamadas leídas de la etiqueta tool_call | 15/22 (68 %) | 20/20 (100 %) | 28/28 (100 %) | 53/53 (100 %) |
+| Llamadas leídas del respaldo Action | 7/22 (32 %) | 0/20 (0 %) | 0/28 (0 %) | 0/53 (0 %) |
+| Cumplen el formato (llamada válida con etiqueta) | 15/22 (68 %) | 20/21 (95 %) | 28/34 (82 %) | 53/53 (100 %) |
+| Respuestas vacías | 0/20 (0 %) | 0/20 (0 %) | 0/20 (0 %) | 0/20 (0 %) |
+| Busca él mismo en la base de conocimiento (si la necesita) | 0/18 (0 %) | 0/18 (0 %) | 3/18 (17 %) | 3/18 (17 %) |
+| Con búsqueda automática previa | 20/20 (100 %) | 20/20 (100 %) | 20/20 (100 %) | 20/20 (100 %) |
+| Pasos medios | 1.1 | 1.1 | 1.7 | 2.6 |
+| Tokens medios | 6558 | 6674 | 11433 | 16862 |
+
+A continuación podemos ver cómo el modelo `thinking` no llega a usar las herramientas necesarias en un 20% de los casos y en un único caso las usa pero genera un resultado incorrecto, y en otro no llega a dar respuesta. El modelo `vllm` no tiene esos fallos: acierta las 20 tareas y las 3 que no cuentan como éxito fiel (t12, t14 y t15) son falsos negativos del criterio `required_tools`, como se explicó antes.
+
+| Clase de fallo | base | rlm | thinking | vllm |
+|---|---|---|---|---|
+| No llega a dar una respuesta (se agotan los pasos o no hay llamada válida) | 0/20 (0 %) | 0/20 (0 %) | 1/20 (5 %) | 0/20 (0 %) |
+| Llama a final_answer pero sin respuesta | 0/20 (0 %) | 0/20 (0 %) | 0/20 (0 %) | 0/20 (0 %) |
+| Responde sin usar las herramientas necesarias | 13/20 (65 %) | 11/20 (55 %) | 4/20 (20 %) | 0/20 (0 %) |
+| El valor aparece pero sin la unidad correcta o fuera de la respuesta final (lucky hit) | 0/20 (0 %) | 0/20 (0 %) | 0/20 (0 %) | 0/20 (0 %) |
+| Usa las herramientas necesarias pero el resultado es incorrecto | 1/20 (5 %) | 0/20 (0 %) | 1/20 (5 %) | 0/20 (0 %) |
+
+Por último, podemos ver cómo ahora el `vllm` cita bien en un 100% de los casos frente al 67% de `thinking`. Podemos concluir que el cerebro usado en el agente era un limitador de los resultados. Con un modelo más grande (27B frente a 1,7B), razona mejor y llama a las herramientas correctas. Hay que tener en cuenta que no hemos aislado el tamaño del modelo de otros factores (el servicio de inferencia, el límite de tokens generados) y que `vllm` necesita más pasos (2,6 frente a 1,7) y más tokens (16862 frente a 11433). Somos conscientes de que la comparación no es del todo justa porque solo el `vllm` tiene un `MAX_NEW_TOKENS` mayor (4096, frente a 1024 en los cerebros locales). Esta diferencia es deliberada: con 4096 tokens máximos los cerebros locales tardan mucho más que el `vllm` en completar el bench y el `vllm` de un análisis individual vimos que necesitaba realizar más pasos para algunas task pero que las acababa respondiendo bien, por lo que decidimos usar valores de `MAX_NEW_TOKENS` distintos.
+
+| Clase | base | rlm | thinking | vllm |
+|---|---|---|---|---|
+| Correcto y trazable (citas válidas y de la evidencia) | 4/18 (22 %) | 2/18 (11 %) | 12/18 (67 %) | 18/18 (100 %) |
+| Correcto pero sin ninguna cita | 0/18 (0 %) | 5/18 (28 %) | 0/18 (0 %) | 0/18 (0 %) |
+| Correcto pero con citas inventadas (no devueltas por la búsqueda) | 0/18 (0 %) | 0/18 (0 %) | 0/18 (0 %) | 0/18 (0 %) |
+| Correcto con citas válidas, pero no de la ficha que contiene la evidencia | 0/18 (0 %) | 0/18 (0 %) | 0/18 (0 %) | 0/18 (0 %) |
+| Incorrecto y la evidencia nunca llegó al modelo (fallo del retriever) | 7/18 (39 %) | 5/18 (28 %) | 4/18 (22 %) | 0/18 (0 %) |
+| Incorrecto aunque tenía la evidencia y la citó bien (fallo de cálculo o lectura) | 6/18 (33 %) | 2/18 (11 %) | 1/18 (6 %) | 0/18 (0 %) |
+| Incorrecto, con la evidencia recuperada pero sin cita válida de ella | 1/18 (6 %) | 4/18 (22 %) | 1/18 (6 %) | 0/18 (0 %) |
+| **Total** | 18/18 (100 %) | 18/18 (100 %) | 18/18 (100 %) | 18/18 (100 %) |
+
+**Qué concluimos.** Con estos resultados determinamos que el `vllm` es el cerebro que mejor funciona hasta la fecha por lo que decidimos seguir adelante con este cerebro.
+
+--

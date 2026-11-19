@@ -148,16 +148,24 @@ def dose_calculator(expression: str, decimals: int = 2) -> float:
 def _split_steps(steps: str) -> list[str]:
     """One step per line. A model that writes them in one line still gets separate steps: they are
     split at ";" and at a full stop followed by a capital letter ("... = 600 mg. Volumen = ...").
-    A decimal such as "0.5 mg" is not split: there is no space after its dot."""
+    A decimal such as "0.5 mg" is not split: there is no space after its dot.
+    A number or bullet the model wrote at the start of a step ("1. ", "2) ", "- ") is removed:
+    the sheet numbers the steps itself and it would come out as "1. 1. ..."."""
     if "\n" in steps:
         parts = steps.splitlines()
     else:
+        # "1. Dosis ... mg. 2. Volumen ...": drop the list numbers first, so "2." is not read as a sentence
+        steps = re.sub(r"(?:^|(?<=[.;]\s))\d{1,2}[.)]\s+", "", steps)
         parts = [
             piece
             for chunk in steps.split(";")
             for piece in re.split(r"(?<=\.)\s+(?=[A-ZÁÉÍÓÚÑ¿¡])", chunk)
         ]
-    return [part.strip() for part in parts if part.strip()]
+    return [
+        re.sub(r"^(?:\d+[.)]|[-*•])\s+", "", part.strip())
+        for part in parts
+        if part.strip()
+    ]
 
 
 @tool(requires_confirmation=True)

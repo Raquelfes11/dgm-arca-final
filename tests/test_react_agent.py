@@ -613,3 +613,18 @@ def test_preparation_sheet_steps_are_split_into_separate_lines():
     assert _split_steps("a = 1; b = 2") == ["a = 1", "b = 2"]
     assert _split_steps("Dosis: 0.5 mg/kg x 70 kg = 35 mg") == ["Dosis: 0.5 mg/kg x 70 kg = 35 mg"]  # decimal kept
     assert _split_steps("uno\ndos\n\ntres") == ["uno", "dos", "tres"]
+
+
+def test_preparation_sheet_steps_do_not_keep_the_models_own_numbers():
+    """The sheet numbers the steps: "1. 1. Dosis" came out when the model numbered them too."""
+    from tool_use.tools import _split_steps
+
+    assert _split_steps("1. Dosis = 600 mg\n2. Volumen = 60 mL\n3) Comprobar") == [
+        "Dosis = 600 mg", "Volumen = 60 mL", "Comprobar",
+    ]
+    assert _split_steps("- uno\n* dos") == ["uno", "dos"]
+    one_line = "1. Dosis = 600 mg. 2. Volumen = 60 mL. 3. Comprobar."
+    assert _split_steps(one_line) == ["Dosis = 600 mg.", "Volumen = 60 mL.", "Comprobar."]
+    # a quantity at the start of a step is not a number of the list
+    assert _split_steps("1,5 mL/kg x 40 kg = 60 mL") == ["1,5 mL/kg x 40 kg = 60 mL"]
+    assert _split_steps("0.5 mg/kg x 70 kg = 35 mg") == ["0.5 mg/kg x 70 kg = 35 mg"]
