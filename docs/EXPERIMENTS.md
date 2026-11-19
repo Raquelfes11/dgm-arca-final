@@ -3103,7 +3103,7 @@ siguientes niveles del #12 (herramienta correcta, argumentos y respuesta) quedan
 
 ---
 
-### 2026-17-11 · Proyecto final · Few shot prompt: incluimos tres ejemplos en el prompt del modelo
+### 2026-11-17 · Proyecto final · Few shot prompt: incluimos tres ejemplos en el prompt del modelo
 
 **Qué queríamos saber.** Queríamos saber si el agente mejoraría si le incluíamos en su prompt varios ejemplos de como hacer el bucle de ReAct.
 
@@ -3155,7 +3155,7 @@ Toda esta información podemos encontrarla en el informe guardado en `reports/fi
 
 ---
 
-### 2026-18-11 · Proyecto final · Check respuesta del agente más estricto
+### 2026-11-18 · Proyecto final · Check respuesta del agente más estricto
 
 **Qué queríamos saber.** Queríamos hacer más estrictia la evaluación de la respuesta del agente incluyendo que devuelva las unidades que se piden en la pregunta y chequeando que el número identificado como respuesta final sea realmente la respuesta del agente.
 
@@ -3191,7 +3191,7 @@ Como podemos ver en la respuesta del agente para la tarea t11, este no sigue el 
 
 ---
 
-### 2026-18-11 · Proyecto final · Chequea las citas devueltas por el agente
+### 2026-11-18 · Proyecto final · Chequea las citas devueltas por el agente
 
 **Qué queríamos saber.** Queremos ser capaces de evaluar las citas devueltas por el agente y mejorar su prompt para que los ejemplos del few shot reflejen verdaderamente como queremos que se vean las citas.
 
@@ -3215,7 +3215,7 @@ uv run python -m agent.analyze_eval --report reports/fix/09/fix09_few_shot__eval
 
 ---
 
-### 2026-18-11 · Proyecto final · Prompt con ejemplos de buenas citas
+### 2026-11-18 · Proyecto final · Prompt con ejemplos de buenas citas
 
 **Qué queríamos saber.** Con el fin de que el agente siga la misma estructura de citado que esperamos, hemos modificado los ejemplos del prompt para que el agente tenga una referencia de cómo se debe de citar bien.
 
@@ -3285,3 +3285,62 @@ respuesta de confirmación de si quería la sheet o no. Sin embargo, luego pens�
 **Qué pasó.** Tras ejecutar algunas pruebas a través de la API hemos comprobado que el agente genera correctamente la preparation sheet cuando se le pide y no la genera cuando le decimos que no la queremos o cuando directamente no la mencionamos.
 
 **Qué concluimos.** Los cambios introducidos permiten que se ejecute la tool de create_preparation_sheet() que llevaba desde la fase 2 sin poder ejecutarse. Durante las pruebas hemos visto que hay casos en los que hay que llamar a herramientas y el agente no lo hace, pero eso no es la primera vez que ocurre y no era el objetivo de esta implementación.
+
+---
+
+### 2026-11-18 · Proyecto final · Agente con prompt unificado
+
+**Qué queríamos saber.** Queríamos ver si el rendimiento mejoraba incluyendo un ejemplo al prompt que mostrase al modelo cómo puede responder consultas sobre más de un medicamento.
+
+**Qué hicimos.** Incluimos un nuevo ejemplo al final del `FEW_SHOT_EXAMPLES` que meustra al agente como responder respuestas que tratan de más de un medicamento.
+
+Para obtener de nuevo las respuestas del agente hemos ejecutado el siguiente comando que ha generado automáticamente las tablas al terminar la inferencia:
+```
+make bench FIX=09 LABEL=1more_example_and_user_interaction BRAINS="base rlm thinking"
+```
+
+**Qué pasó.** Cómo se puede observar en esta primera tabla, el rendimiento del cerebro `thinking` sigue presentando significativas mejoras frente a los otros dos y ya no comete lucky hits. La mayoría de las llamadas a herramientas se realizan con la etiqueta de <tool_call> adecuadamente para los tres cerebros.
+
+| Métrica | base | rlm | thinking |
+|---|---|---|---|
+| Éxito en las tareas principales | 4/20 (20 %) | 6/20 (30 %) | 14/20 (70 %) |
+| Aciertos casuales (lucky hits) | 0/20 (0 %) | 0/20 (0 %) | 0/20 (0 %) |
+| Éxito fiel (correcto y con las herramientas requeridas) | 0/20 (0 %) | 0/20 (0 %) | 4/20 (20 %) |
+| Llegan a final_answer | 20/20 (100 %) | 17/20 (85 %) | 20/20 (100 %) |
+| Casos de borde acertados | 0/5 (0 %) | 1/5 (20 %) | 3/5 (60 %) |
+| Pasos sin llamada válida | 0/21 (0 %) | 7/24 (29 %) | 5/36 (14 %) |
+| Llamadas leídas de la etiqueta tool_call | 17/21 (81 %) | 17/17 (100 %) | 31/31 (100 %) |
+| Llamadas leídas del respaldo Action | 4/21 (19 %) | 0/17 (0 %) | 0/31 (0 %) |
+| Cumplen el formato (llamada válida con etiqueta) | 17/21 (81 %) | 17/24 (71 %) | 31/36 (86 %) |
+| Respuestas vacías | 0/20 (0 %) | 0/20 (0 %) | 0/20 (0 %) |
+| Busca él mismo en la base de conocimiento (si la necesita) | 0/18 (0 %) | 0/18 (0 %) | 3/18 (17 %) |
+| Con búsqueda automática previa | 20/20 (100 %) | 20/20 (100 %) | 20/20 (100 %) |
+| Pasos medios | 1.1 | 1.2 | 1.8 |
+| Tokens medios | 6243 | 7856 | 12159 |
+
+A continuación podemos ver cómo el modelo `thinking` no llega a usar las herramientas necesarias en un 25% de los casos y en un único caso las usa pero genera un resultado incorrecto.
+
+| Clase de fallo | base | rlm | thinking |
+|---|---|---|---|
+| No llega a dar una respuesta (se agotan los pasos o no hay llamada válida) | 0/20 (0 %) | 3/20 (15 %) | 0/20 (0 %) |
+| Llama a final_answer pero sin respuesta | 0/20 (0 %) | 0/20 (0 %) | 0/20 (0 %) |
+| Responde sin usar las herramientas necesarias | 15/20 (75 %) | 11/20 (55 %) | 5/20 (25 %) |
+| El valor aparece pero sin la unidad correcta o fuera de la respuesta final (lucky hit) | 0/20 (0 %) | 0/20 (0 %) | 0/20 (0 %) |
+| Usa las herramientas necesarias pero el resultado es incorrecto | 1/20 (5 %) | 0/20 (0 %) | 1/20 (5 %) |
+
+Por último, podemos ver cómo ahora el modelo cita bien en un 67% de los casos frente a un 44% de la ejecución realizada el 2026-11-17. De esos 4 nuevos aciertos, 3 eran los tres de la cuarta clase (Correcto con citas válidas, pero no de la ficha que contiene la evidencia). Por lo tanto, podemos concluir que el ejemplo inlcuido en el prompt ayuda al agente y mejora su rendimiento.
+
+| Clase | base | rlm | thinking |
+|---|---|---|---|
+| Correcto y trazable (citas válidas y de la evidencia) | 2/18 (11 %) | 2/18 (11 %) | 12/18 (67 %) |
+| Correcto pero sin ninguna cita | 0/18 (0 %) | 2/18 (11 %) | 0/18 (0 %) |
+| Correcto pero con citas inventadas (no devueltas por la búsqueda) | 0/18 (0 %) | 0/18 (0 %) | 0/18 (0 %) |
+| Correcto con citas válidas, pero no de la ficha que contiene la evidencia | 0/18 (0 %) | 0/18 (0 %) | 0/18 (0 %) |
+| Incorrecto y la evidencia nunca llegó al modelo (fallo del retriever) | 8/18 (44 %) | 7/18 (39 %) | 4/18 (22 %) |
+| Incorrecto aunque tenía la evidencia y la citó bien (fallo de cálculo o lectura) | 7/18 (39 %) | 4/18 (22 %) | 1/18 (6 %) |
+| Incorrecto, con la evidencia recuperada pero sin cita válida de ella | 1/18 (6 %) | 3/18 (17 %) | 1/18 (6 %) |
+| **Total** | 18/18 (100 %) | 18/18 (100 %) | 18/18 (100 %) |
+
+**Qué concluimos.** Con estos resultados determinamos que el ejemplo añadido al prompt del agente mejora su rendimiento por lo que decidimos seguir adelante con este prompt.
+
+--
