@@ -60,3 +60,11 @@ def test_bench_does_not_overwrite_an_existing_report():
     finally:
         existing.unlink()
         existing.parent.rmdir()
+
+
+def test_bench_uses_the_original_bench_unless_told_otherwise():
+    default = dry_run("FIX=99", "LABEL=prueba").stdout
+    assert "--bench agent/bench/tasks.jsonl" in default
+    ood = dry_run("FIX=99", "LABEL=prueba", "BENCH=agent/bench/tasks_ood.jsonl").stdout
+    assert "validate_bench --bench agent/bench/tasks_ood.jsonl" in ood
+    assert "agent.evaluate --bench agent/bench/tasks_ood.jsonl" in ood

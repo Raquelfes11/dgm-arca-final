@@ -3468,3 +3468,69 @@ fichas) un fallo puede deberse al retriever y no al razonamiento del agente. El 
 con las de la ficha: los errores que corregimos los encontramos leyendo las fichas a mano.
 
 ---
+
+### 2026-11-21 · Proyecto final · Evaluación de los cuatro cerebros en el banco OOD
+
+**Qué queríamos saber.** Si el agente se había sobreajustado a las 25 tareas de `agent/bench/tasks.jsonl`,
+comparando su rendimiento en ese banco con el que tiene en `agent/bench/tasks_ood.jsonl`.
+
+**Qué hicimos.** Evaluamos los cuatro cerebros (`base`, `rlm`, `thinking` y `vllm`) en el banco OOD con
+el mismo comando que en la entrada del vLLM, cambiando solo el banco (para eso añadimos la variable
+`BENCH` al `Makefile`):
+```
+make bench FIX=ood LABEL=cuatro_cerebros BENCH=agent/bench/tasks_ood.jsonl BRAINS="base rlm thinking vllm"
+```
+
+**Qué pasó.**
+
+| Métrica | base | rlm | thinking | vllm |
+|---|---|---|---|---|
+| Éxito en las tareas principales | 3/20 (15 %) | 4/20 (20 %) | 9/20 (45 %) | 19/20 (95 %) |
+| Aciertos casuales (lucky hits) | 1/20 (5 %) | 0/20 (0 %) | 0/20 (0 %) | 0/20 (0 %) |
+| Éxito fiel (correcto y con las herramientas requeridas) | 0/20 (0 %) | 0/20 (0 %) | 2/20 (10 %) | 15/20 (75 %) |
+| Llegan a final_answer | 19/20 (95 %) | 17/20 (85 %) | 19/20 (95 %) | 19/20 (95 %) |
+| Casos de borde acertados | 0/5 (0 %) | 1/5 (20 %) | 4/5 (80 %) | 4/5 (80 %) |
+| Pasos sin llamada válida | 2/27 (7 %) | 7/24 (29 %) | 3/37 (8 %) | 1/65 (2 %) |
+| Llamadas leídas de la etiqueta tool_call | 23/25 (92 %) | 17/17 (100 %) | 34/34 (100 %) | 64/64 (100 %) |
+| Llamadas leídas del respaldo Action | 2/25 (8 %) | 0/17 (0 %) | 0/34 (0 %) | 0/64 (0 %) |
+| Cumplen el formato (llamada válida con etiqueta) | 23/27 (85 %) | 17/24 (71 %) | 34/37 (92 %) | 64/65 (98 %) |
+| Respuestas vacías | 0/20 (0 %) | 0/20 (0 %) | 0/20 (0 %) | 0/20 (0 %) |
+| Busca él mismo en la base de conocimiento (si la necesita) | 1/18 (6 %) | 0/18 (0 %) | 5/18 (28 %) | 4/18 (22 %) |
+| Con búsqueda automática previa | 20/20 (100 %) | 20/20 (100 %) | 20/20 (100 %) | 20/20 (100 %) |
+| Pasos medios | 1.4 | 1.2 | 1.9 | 3.2 |
+| Tokens medios | 8209 | 7915 | 12512 | 22290 |
+| Latencia media por tarea | 30.9 s | 49.8 s | 24.2 s | 12.7 s |
+| Latencia p95 | 92.8 s | 289.9 s | 48.2 s | 36.3 s |
+
+Vemos que sobre estas tareas OOD el orden de los modelos se mantiene: el `vllm` sigue siendo el que mejor funciona. En la ejecución anterior sobre `tasks.jsonl` los porcentajes de éxito fueron 30 %, 45 %, 70 % y 100 % (`base`, `rlm`, `thinking` y `vllm`), frente al 15 %, 20 %, 45 % y 95 % de la ejecución sobre `tasks_ood.jsonl`. El único que mantiene una tasa de éxito más o menos constante entre los dos bancos es el `vllm`, y luego veremos por qué falla las dos tareas que falla. El único que tiene un lucky hit es `base`, lo que no sorprende demasiado porque es el de menor capacidad. El `vllm` sigue siendo el que mayor éxito fiel obtiene, con un 75 %. Hay 5 tareas que no cuentan como fieles: o16, que no llega a responder, y o09, o10, o11 y o20, que son correctas pero resuelven la conversión de unidades dentro de `dose_calculator` y no llaman a `convert_units`, que está en `required_tools`. Igual que t12 en la entrada del vLLM, parecen falsos negativos del criterio, porque lo que queremos es que no haga los cálculos de cabeza y no los está haciendo.
+
+Los modelos más grandes o con fine-tuning (`rlm`, `thinking` y `vllm`) llaman a las herramientas con `<tool_call>`, como debe hacerse, y nunca con `Action: <nombre_herramienta>`, el respaldo que pusimos pero al que no deberían llegar. Solo `base` cae al respaldo en 2 de sus 25 llamadas. En términos de tiempo, `rlm` es el que mayor latencia tiene y `vllm` el que menos. Tiene sentido: a `rlm` le pedimos explícitamente que razone y además lo entrenamos nosotras, así que puede ser que su razonamiento no esté tan optimizado como el de los modelos Qwen3 sin fine-tunear. Además, `vllm` tarda menos porque no lo ejecutamos en local, sino que es un servicio que se ha puesto a nuestra disposición y usarlo es solo una llamada a la API.
+
+| Clase | base | rlm | thinking | vllm |
+|---|---|---|---|---|
+| Correcto y trazable (citas válidas y de la evidencia) | 2/18 (11 %) | 2/18 (11 %) | 8/18 (44 %) | 15/18 (83 %) |
+| Correcto pero sin ninguna cita | 1/18 (6 %) | 1/18 (6 %) | 0/18 (0 %) | 1/18 (6 %) |
+| Correcto pero con citas inventadas (no devueltas por la búsqueda) | 0/18 (0 %) | 0/18 (0 %) | 0/18 (0 %) | 1/18 (6 %) |
+| Correcto con citas válidas, pero no de la ficha que contiene la evidencia | 0/18 (0 %) | 0/18 (0 %) | 1/18 (6 %) | 0/18 (0 %) |
+| Incorrecto y la evidencia nunca llegó al modelo (fallo del retriever) | 7/18 (39 %) | 6/18 (33 %) | 6/18 (33 %) | 0/18 (0 %) |
+| Incorrecto aunque tenía la evidencia y la citó bien (fallo de cálculo o lectura) | 8/18 (44 %) | 1/18 (6 %) | 3/18 (17 %) | 0/18 (0 %) |
+| Incorrecto, con la evidencia recuperada pero sin cita válida de ella | 0/18 (0 %) | 8/18 (44 %) | 0/18 (0 %) | 1/18 (6 %) |
+| **Total** | 18/18 (100 %) | 18/18 (100 %) | 18/18 (100 %) | 18/18 (100 %) |
+
+El `vllm` cita en la mayor parte de las tareas: casi dobla la tasa de tareas con citas válidas y de la evidencia que tiene `thinking` (83 % frente a 44 %). Además no tiene fallos del retriever ni de cálculo o lectura.
+
+| Clase de fallo | base | rlm | thinking | vllm |
+|---|---|---|---|---|
+| No llega a dar una respuesta (se agotan los pasos o no hay llamada válida) | 1/20 (5 %) | 3/20 (15 %) | 1/20 (5 %) | 1/20 (5 %) |
+| Llama a final_answer pero sin respuesta | 0/20 (0 %) | 0/20 (0 %) | 0/20 (0 %) | 0/20 (0 %) |
+| Responde sin usar las herramientas necesarias | 16/20 (80 %) | 13/20 (65 %) | 8/20 (40 %) | 0/20 (0 %) |
+| El valor aparece pero sin la unidad correcta o fuera de la respuesta final (lucky hit) | 0/20 (0 %) | 0/20 (0 %) | 0/20 (0 %) | 0/20 (0 %) |
+| Usa las herramientas necesarias pero el resultado es incorrecto | 0/20 (0 %) | 0/20 (0 %) | 2/20 (10 %) | 0/20 (0 %) |
+
+Hay una tarea en la que el `vllm` no llega a dar una respuesta: o16. Leyendo sus trazas de razonamiento vemos que sí sabía lo que tenía que hacer y lo que tenía que buscar, pero gasta los 10 pasos máximos buscándolo, y cuando lo encuentra ya no le quedan pasos para hacer el cálculo y llamar a `final_answer`. Lo que le impide encontrarlo es que en 9 de los 10 pasos busca por el principio activo en lugar de por el nombre comercial, y el chunk que contiene la posología no menciona ni una vez el dexketoprofeno. Sí aparece Enantyum, el nombre comercial, por la cabecera que le pusimos a cada chunk (nombre comercial + sección). Cuando decide buscar por la sección, ya le aparece la posología.
+
+Hay otra tarea que el `vllm` responde mal, o24. Se planteó pensando que el agente no podría responderla, pero no se tuvo en cuenta que la equivalencia entre gramos y UI del medicamento que usamos (heparina) sí está en la base de conocimiento, y el agente la obtiene con la llamada automática a `search_knowledge_base`. Realmente el agente responde bien a la pregunta; lo que nosotras considerábamos una respuesta correcta resulta no serlo.
+
+**Qué concluimos.** Sobre las tareas OOD el orden de los modelos se mantiene y el `vllm` sigue siendo el que mejor funciona. Los cerebros `base`, `rlm` y `thinking` sí habían hecho overfitting sobre las tareas de `tasks.jsonl`, porque su tasa de éxito cae casi a la mitad en el banco OOD. El `vllm` mantiene una tasa de éxito más o menos constante en los dos bancos. De las dos tareas que falla, una es un error de diseño del banco (o24) y la otra, un problema de recuperación (o16). Para o16 creemos que se resolvería añadiendo a la cabecera de cada chunk el nombre del principio activo además del nombre comercial; y por lo visto en las demás tareas, con más pasos el agente podría haber llegado a responderla, y además correctamente. Para o24 hay que rediseñarla con un medicamento que no esté en el corpus antes de usar los casos de borde para comparar.
+
+---
