@@ -3401,3 +3401,48 @@ Por último, podemos ver cómo ahora el `vllm` cita bien en un 100% de los casos
 **Qué concluimos.** Con estos resultados determinamos que el `vllm` es el cerebro que mejor funciona hasta la fecha por lo que decidimos seguir adelante con este cerebro.
 
 --
+
+### 2026-11-21 · Proyecto final · Banco de tareas OOD: diseño y validación
+
+**Qué queríamos saber.** Si el agente se había sobreajustado a las 25 tareas de `agent/bench/tasks.jsonl`
+al iterar sobre ellas, y para eso necesitábamos un banco fuera de distribución (OOD) con el mismo
+formato, cuya respuesta final se pueda comprobar sin leerla a mano y que fuese fiable antes de gastar
+GPU en él.
+
+**Qué hicimos.** Escribimos 25 tareas en `agent/bench/tasks_ood.jsonl` (ids `o01`-`o25`): 20
+principales (cada una necesita al menos dos herramientas distintas) y 5 de borde (`"core": false`),
+que se miden aparte y no entran en la tasa de éxito. Las principales son de cinco tipos: cálculo a
+partir de una ficha (o01-o08), cálculo con cambio de unidades o elección de un valor de un rango
+(o09-o13), concentración sacada de CIMA en vivo (o14, o15), combinación de dos fichas (o16-o18) y
+cuatro o tres cálculos seguidos (o19, o20). Las de borde son: medicamento que no está en el corpus
+(o21, o22), hoja PDF que el agente genera y cuya ruta debe citar (o23), conversión imposible (o24) y
+medicamento que no existe en CIMA (o25). Para que sean OOD usan solo medicamentos que no aparecen en
+`tasks.jsonl` (15 de los 47 del corpus), otras secciones de la ficha (conservación, velocidades de
+perfusión, dosis pediátricas, topes de dosis única) y, en CIMA en vivo, ketorolaco y haloperidol, que
+no están en el corpus. El dato clínico de cada tarea sale de una ficha de CIMA y se guarda como pasaje
+literal en `evidence`; los pesos y la pregunta son inventados. Lo comprobamos además contra la
+respuesta cruda de la API de CIMA, no solo contra `rag/corpus/`. La aritmética que da cada número
+esperado está en `answer_exprs`. Tras revisarlas una a una corregimos errores de población o
+indicación (la dosis de la ficha era pediátrica y el enunciado hablaba de un adulto, o al revés) y
+quitamos del enunciado las concentraciones que el agente puede leer de la sección 2 de la ficha.
+
+`uv run python -m agent.validate_bench --bench agent/bench/tasks_ood.jsonl` comprueba la estructura,
+que `answer_exprs` dé el valor del `check`, que las herramientas existan y que cada `evidence` siga
+literalmente en `rag/corpus/`; hay que repetirlo cada vez que se vuelva a descargar el corpus, porque
+CIMA actualiza las fichas. Con `--retrieval` mira además cuántos pasajes de evidencia llegan al top-5
+del retriever de la fase 3.
+
+**Qué pasó.** El banco pasa la validación (25 tareas, 20 principales). Con `--retrieval`, en 11 de las
+18 tareas que tienen evidencia (o14 y o15 no la tienen) llegan al top-5 todos los pasajes (o01, o03,
+o04, o05, o06, o07, o08, o10, o11, o12, o13). En o16, o17, o18, o19 y o20 llega una parte (1/2, 1/2,
+1/4, 1/3 y 4/7) y en o02 y o09 no llega ninguno. Todavía no hemos ejecutado `agent.evaluate` sobre él.
+
+**Qué concluimos.** Aún no podemos decir si hay sobreajuste: falta evaluar. Cuando se evalúe, la
+comparación es éxito en `t01`-`t25` frente a `o01`-`o25`; para que siga siendo un conjunto reservado no
+hay que ajustar el agente mirando sus fallos. Hay que tener cuidado con: el `check` numérico acepta cualquier número de la respuesta
+que coincida (por eso se guardan `required_tools_used` y el éxito "fiel"); o14 y o15 que dependen de la
+API de CIMA; y en las tareas con recuperación parcial (sobre todo o20, que necesita siete pasajes de cuatro
+fichas) un fallo puede deberse al retriever y no al razonamiento del agente. El validador no comprueba que la población o la indicación del enunciado coincidan
+con las de la ficha: los errores que corregimos los encontramos leyendo las fichas a mano.
+
+---
