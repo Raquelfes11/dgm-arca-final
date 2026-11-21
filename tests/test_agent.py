@@ -1,6 +1,6 @@
 """Memory mechanics and the benchmark checker are given; the loop is yours."""
 
-from agent.evaluate import check_answer
+from agent.evaluate import check_answer, percentile, summarise
 from agent.memory import ConversationMemory
 
 
@@ -27,3 +27,11 @@ def test_check_answer_kinds():
     assert check_answer({"check": {"type": "number", "value": 7}}, "The name has 7 letters")
     assert check_answer({"check": {"type": "number", "value": 21.5, "tolerance": 0.5}}, "≈ 21.2 °C")
     assert not check_answer({"check": {"type": "regex", "value": r"\bF\b"}}, "no unit here")
+
+def test_latency_summary():
+    rows = [{"correct": True, "n_steps": 1, "tokens_used": 1, "latency_s": s} for s in (1.0, 2.0, 3.0, 10.0)]
+    out = summarise(rows)
+    assert out["mean_latency_s"] == 4.0
+    assert out["median_latency_s"] == 2.0
+    assert out["max_latency_s"] == 10.0
+    assert percentile([], 0.5) == 0.0
