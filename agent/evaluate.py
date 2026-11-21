@@ -16,9 +16,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import unicodedata
 from pathlib import Path
+import time
 
 # A number as written in Spanish or English: 7, 7.5, 7,5, 1.050, 1,050.5, 1.050,5, 8.400.000.
 # It must not be glued to a letter on the left, so "2-8" gives 2 and 8 and "B12" gives nothing.
@@ -237,6 +239,10 @@ def citation_report(task: dict, answer: str, steps: list[dict]) -> dict | None:
         "evidence_cited": bool(evidence_files) and evidence_files <= cited_files,
     }
 
+def percentile(values: list[float], q: float) -> float:
+    """Percentil q (0-1) por rango más cercano; con pocas tareas p95 es casi el máximo."""
+    ordered = sorted(values)
+    return ordered[max(0, math.ceil(q * len(ordered)) - 1)] if ordered else 0.0
 
 def summarise(rows: list[dict]) -> dict:
     n = max(len(rows), 1)
@@ -256,6 +262,13 @@ def summarise(rows: list[dict]) -> dict:
         out["traceable_rate"] = sum(r["traceable"] for r in traced) / len(traced)
         out["uncited_rate"] = sum(not r["citations"]["cited"] for r in traced) / len(traced)
         out["invalid_citation_rate"] = sum(bool(r["citations"]["invalid_citations"]) for r in traced) / len(traced)
+
+    latencies = [r["latency_s"] for r in rows if "latency_s" in r]
+    if rows and len(latencies) == len(rows):
+        out["mean_latency_s"] = sum(latencies) / n
+        out["median_latency_s"] = percentile(latencies, 0.5)
+        out["p95_latency_s"] = percentile(latencies, 0.95)
+        out["max_latency_s"] = max(latencies)
     return out
 
 
@@ -325,7 +338,9 @@ def main() -> None:
         rows = []
         try:
             for i, task in enumerate(tasks, 1):
+                start = time.perf_counter()
                 response = agent.run(task["task"], max_steps=args.max_steps, brain=brain)
+                latency = time.perf_counter() - start
                 response = response.model_dump()
                 ok_ans = response["succeeded"] and check_answer(task, response["final_answer"], args.check_mode)
                 lax = response["succeeded"] and check_answer(task, response["final_answer"], "lax")
@@ -336,8 +351,9 @@ def main() -> None:
                     {
                         **task,
                         **response,
-                        "correct": ok_ans, 
+                        "correct": ok_ans,
                         "correct_lax": lax,
+                        "latency_s": round(latency, 2),
                         "tools_used": sorted(used),
                         "auto_tools": sorted(by_agent),
                         "required_tools_used": set(task.get("required_tools", []))
@@ -350,7 +366,7 @@ def main() -> None:
                 )
                 print(
                     f"[{brain}] {i}/{len(tasks)} {task.get('id', '?')}: "
-                    f"{'OK' if ok_ans else 'fail'} ({response['n_steps']} steps)",
+                    f"{'OK' if ok_ans else 'fail'} ({response['n_steps']} steps, {latency:.1f} s)",
                     flush=True,
                 )
         except (ValueError, OSError, RuntimeError, httpx.HTTPError) as error:  # e.g. no rlm adapter, no vLLM key or server
