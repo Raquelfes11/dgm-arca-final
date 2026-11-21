@@ -3400,7 +3400,29 @@ Por último, podemos ver cómo ahora el `vllm` cita bien en un 100% de los casos
 
 **Qué concluimos.** Con estos resultados determinamos que el `vllm` es el cerebro que mejor funciona hasta la fecha por lo que decidimos seguir adelante con este cerebro.
 
---
+---
+
+### 2026-11-21 · Proyecto final · Función de latencia
+
+**Qué queríamos saber.** Queríamos tener el número exacto de la latencia de los modelos. 
+
+**Qué hicimos.** Cualitativamente sabemos que el cerebro `vllm` es más rápido que el cerebro `thinking` pero queríamos tener el dato exacto. Para ello, hemos añadido un temporizador en el bucle del agente para medir cuánto tarda el modelo en responder cada pregunta. 
+
+Para probar su correcto funcionamiento, hemos ejecutado el siguiente comando:
+```bash
+make bench FIX=13 LABEL=testing_latency_func
+```
+
+**Qué pasó.** Hemos obtenido que el modelo `vllm` tiene una latencia media por tarea de aproximadament 8 segundos y el 95% de las tareas se responden en menos de 20 segundos.
+
+| Métrica | vllm |
+|---|---|
+| Latencia media por tarea | 8.4 s |
+| Latencia p95 | 20.0 s |
+
+**Qué concluimos.** Concluimos que la función funciona correctamente. La siguiente ejecución con las nuevas preguntas podremos comparar y analizar cuantitativamente la mejora de lantencia del vllm.
+
+---
 
 ### 2026-11-21 · Proyecto final · Banco de tareas OOD: diseño y validación
 

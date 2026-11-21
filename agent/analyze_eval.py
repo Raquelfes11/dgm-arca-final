@@ -24,6 +24,9 @@ import argparse
 import json
 from pathlib import Path
 
+from agent.evaluate import percentile
+
+
 # Order matters: a failed run gets the first class that applies.
 FAILURE_CLASSES = {
     "no_termina": "No llega a dar una respuesta (se agotan los pasos o no hay llamada válida)",
@@ -102,6 +105,9 @@ def analyse_brain(rows: list[dict]) -> dict:
         kind = classify_traceability(row)
         if kind:
             trace_classes[kind] += 1
+
+    latencies = [r["latency_s"] for r in core if "latency_s" in r]
+    has_latency = bool(core) and len(latencies) == len(core)
     return {
         "n_core": len(core),
         "n_edge": len(edge),
@@ -134,6 +140,11 @@ def analyse_brain(rows: list[dict]) -> dict:
         "evidence_cited": sum(c["evidence_cited"] for c in cites),
         "correct_untraceable": sum(r["correct"] and not r["traceable"] for r in traced),
         "trace_classes": trace_classes,
+        "has_latency": has_latency,
+        "mean_latency": sum(latencies) / len(latencies) if has_latency else 0.0,
+        "median_latency": percentile(latencies, 0.5) if has_latency else 0.0,
+        "p95_latency": percentile(latencies, 0.95) if has_latency else 0.0,
+        "total_latency": sum(latencies) if has_latency else 0.0,
     }
 
 
@@ -210,6 +221,8 @@ def render(analysis: dict, grid: bool = True) -> str:
         ("Con búsqueda automática previa", lambda m: _pct(m["auto_search"], m["n_core"])),
         ("Pasos medios", lambda m: f"{m['mean_steps']:.1f}"),
         ("Tokens medios", lambda m: f"{m['mean_tokens']:.0f}"),
+        ("Latencia media por tarea", lambda m: f"{m['mean_latency']:.1f} s" if m["has_latency"] else "sin dato"),
+        ("Latencia p95", lambda m: f"{m['p95_latency']:.1f} s" if m["has_latency"] else "sin dato"),
     ]
     table("Resumen por cerebro", ["Métrica"] + names,
           [[label] + [fn(brains[b]) for b in names] for label, fn in metrics])
