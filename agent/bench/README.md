@@ -110,3 +110,17 @@ las fichas y una cifra puede cambiar.
   comillas (t21): el agente puede citar lo que buscó ("omeprazol 40 mg") sin que cuente como dosis.
 * Las dosis son las de las fichas descargadas el día de la descarga, con pesos y
   concentraciones inventados. Es un banco para comparar cerebros, no una referencia clínica.
+
+## Banco OOD (`tasks_ood.jsonl`)
+
+25 tareas más (20 principales + 5 de borde, ids `o01`…`o25`, mismas categorías y formato que
+`tasks.jsonl`) para comprobar que no hay sobreajuste a las 25 originales. Usan **solo
+medicamentos que no aparecen en `tasks.jsonl`**, otras secciones de la ficha (conservación,
+velocidades de perfusión, dosis pediátricas, topes máximos) y, en CIMA en vivo, ketorolaco y
+haloperidol (o14, o15). Los datos salen de las fichas técnicas de CIMA, y cada `evidence` es un
+pasaje literal de `rag/corpus/`.
+
+```bash
+uv run python -m agent.validate_bench --bench agent/bench/tasks_ood.jsonl
+uv run python -m agent.evaluate --bench agent/bench/tasks_ood.jsonl --brains thinking
+```
