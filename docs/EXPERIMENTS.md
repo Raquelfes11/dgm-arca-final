@@ -3565,8 +3565,9 @@ uv run python -m agent.rescore --report reports/fix/ood/fixood_cuatro_cerebros.j
 `tasks_ood.jsonl` (o09, o10, o11 y o20). Las tareas correctas que siguen sin contar como fieles son t14 y t15 en
 `tasks.jsonl`, y en el OOD solo falla o16, que no llega a responder. En `thinking` sube una tarea en tres
 de sus informes. La tasa de éxito de ningún cerebro cambia, porque solo se modifica qué se considera
-haber usado las herramientas. Estos valores salen de una cuenta sobre los JSON guardados; hay que
-confirmarlos con los dos comandos de arriba.
+haber usado las herramientas. Los valores salen de `agent.rescore` y `agent.analyze_eval` sobre los informes
+guardados, en `reports/fix/tool_alternatives/`. En el OOD `thinking` pasa de 2/20 a 3/20 de éxito fiel y los
+otros cerebros no cambian.
 
 **Qué concluimos.** El éxito fiel del `vllm` en el OOD es 95 % y no 75 %, y la diferencia era del criterio y no
 del agente. Dejamos la decisión sobre t14, t15, o14 y o15 abierta: el `vllm` no llama a CIMA en t14 y t15
