@@ -42,7 +42,7 @@ load_dotenv()
 
 RETRIEVER = "hybrid"
 LAMBDA_BM25 = 0.4  # best MRR in the λ sweep with recursive chunking (EXPERIMENTS.md)
-MAX_NEW_TOKENS = 1024  # local brains (transformers)
+MAX_NEW_TOKENS = int(os.environ.get("ARCA_MAX_NEW_TOKENS", "1024"))  # local brains (transformers)
 MAX_NEW_TOKENS_VLLM = 4096  # remote vLLM server
 # Per tool call. Measured in reports/agent_tool_latency.json (see EXPERIMENTS.md, 2026-11-03):
 # normal calls take at most ~1.1 s, the first search (builds the retriever) ~12 s, and CIMA

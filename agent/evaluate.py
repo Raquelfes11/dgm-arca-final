@@ -321,7 +321,7 @@ def main() -> None:
 
     import httpx
 
-    from agent.react_agent import ReActAgent
+    from agent.react_agent import MAX_NEW_TOKENS, MAX_NEW_TOKENS_VLLM, ReActAgent
 
     tasks = [
         json.loads(line)
@@ -378,6 +378,7 @@ def main() -> None:
             "rag_mode": args.rag_mode,
             "use_tools": not args.no_tools,
             "max_steps": args.max_steps,
+            "max_new_tokens": MAX_NEW_TOKENS_VLLM if brain == "vllm" else MAX_NEW_TOKENS,
         }
         results[brain] = summarise_brain(rows, config)
         # Saved after every brain, so a failure in a later one never loses what is done. It is
