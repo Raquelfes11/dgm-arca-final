@@ -9,7 +9,15 @@ from pathlib import Path
 
 import pytest
 
-from agent.evaluate import automatic_tools, check_answer, number_values, summarise, tools_used, citation_report
+from agent.evaluate import (
+    automatic_tools,
+    check_answer,
+    citation_report,
+    number_values,
+    required_tools_met,
+    summarise,
+    tools_used,
+)
 from agent.validate_bench import BENCH, CORPUS, evaluate_expression, load_tasks, validate
 
 TOOLS = {
@@ -128,6 +136,35 @@ def test_validate_reports_the_usual_mistakes():
     assert any("repeated id" in p for p in validate([good, good], tools=TOOLS))
     edge = {**one_tool, "id": "g", "core": False}
     assert validate([edge], tools=TOOLS) == []
+
+
+def test_required_tools_accept_the_alternatives_of_the_task():
+    task = {
+        "required_tools": ["search_knowledge_base", "dose_calculator", "convert_units"],
+        "tool_alternatives": {"convert_units": ["dose_calculator"]},
+    }
+    assert required_tools_met(task, {"search_knowledge_base", "dose_calculator"})
+    assert required_tools_met(task, {"search_knowledge_base", "dose_calculator", "convert_units"})
+    assert not required_tools_met(task, {"dose_calculator", "convert_units"})  # no search
+    assert not required_tools_met(task, {"search_knowledge_base", "convert_units"})
+    no_alternatives = {"required_tools": task["required_tools"]}
+    assert not required_tools_met(no_alternatives, {"search_knowledge_base", "dose_calculator"})
+    assert required_tools_met({}, set())
+
+
+def test_validate_checks_tool_alternatives():
+    task = {
+        "id": "a", "task": "t", "required_tools": ["dose_calculator", "convert_units"],
+        "check": {"type": "number", "value": 480, "unit": "mg"}, "answer_exprs": ["6 * 80"],
+        "tool_alternatives": {"convert_units": ["dose_calculator"]},
+    }
+    assert validate([task], tools=TOOLS) == []
+    not_required = {**task, "id": "b", "tool_alternatives": {"weather": ["dose_calculator"]}}
+    unknown = {**task, "id": "c", "tool_alternatives": {"convert_units": ["weather"]}}
+    not_a_list = {**task, "id": "d", "tool_alternatives": {"convert_units": "dose_calculator"}}
+    for bad, text in [(not_required, "not required"), (unknown, "unknown tool"),
+                      (not_a_list, "must map")]:
+        assert any(text in p for p in validate([bad], tools=TOOLS)), text
 
 
 # ---- the committed benchmark ----------------------------------------------------------------

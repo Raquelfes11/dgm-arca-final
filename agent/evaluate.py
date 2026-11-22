@@ -185,6 +185,21 @@ def _check(check: dict, answer: str, mode: str = "strict") -> bool:
     return not result if check.get("negate") else result
 
 
+def required_tools_met(task: dict, used: set[str]) -> bool:
+    """True when every required tool of the task was used, or one of its accepted alternatives.
+
+    A task may have a tool_alternatives field that maps a required tool to the other tools that do
+    the same job in that task. For example, convert_units can be replaced by dose_calculator when
+    the conversion is just a scale factor: what the required tools check is that the arithmetic is
+    done by a tool and not in the head of the model, and both do that.
+    """
+    alternatives = task.get("tool_alternatives", {})
+    return all(
+        tool in used or any(other in used for other in alternatives.get(tool, []))
+        for tool in task.get("required_tools", [])
+    )
+
+
 def tools_used(steps: list[dict]) -> set[str]:
     """Tools the model chose to call. Steps the agent made by itself are not counted."""
     return {s["action"]["name"] for s in steps if s.get("action") and not s.get("automatic")}
@@ -356,7 +371,8 @@ def main() -> None:
                         "latency_s": round(latency, 2),
                         "tools_used": sorted(used),
                         "auto_tools": sorted(by_agent),
-                        "required_tools_used": set(task.get("required_tools", []))
+                        "required_tools_used": required_tools_met(task, used | by_agent),
+                        "required_tools_used_strict": set(task.get("required_tools", []))
                         <= used | by_agent,
                         "citations": report,
                         "traceable":  None if report is None else bool(
