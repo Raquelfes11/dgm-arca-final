@@ -148,6 +148,17 @@ def validate(
             problems.append(f"{name}: a core task must need at least two different tools")
         if tools is not None:
             problems += [f"{name}: unknown tool {t!r}" for t in required if t not in tools]
+        alternatives = task.get("tool_alternatives", {})
+        if not isinstance(alternatives, dict) or not all(
+            isinstance(v, list) for v in alternatives.values()
+        ):
+            problems.append(f"{name}: tool_alternatives must map a tool to a list of tools")
+        else:
+            for tool, others in alternatives.items():
+                if tool not in required:
+                    problems.append(f"{name}: tool_alternatives for {tool!r}, which is not required")
+                if tools is not None:
+                    problems += [f"{name}: unknown tool {t!r}" for t in others if t not in tools]
 
         numbers = [c for c in _flatten(task["check"]) if c.get("type") == "number"]
         expressions = task.get("answer_exprs", [])

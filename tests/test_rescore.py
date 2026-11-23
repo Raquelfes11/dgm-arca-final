@@ -49,3 +49,21 @@ def test_rescore_strict_counts_lucky_hits():
     assert [r["correct_lax"] for r in s["rows"]] == [True, True]
     assert s["lucky_hits"] == 1
     assert s["success_rate_lax"] == 1.0 and s["success_rate"] == 0.5
+
+
+def test_rescore_looks_at_the_required_tools_again_with_the_alternatives():
+    tasks = {"t12": {"id": "t12", "core": True,
+                     "required_tools": ["search_knowledge_base", "convert_units"],
+                     "tool_alternatives": {"convert_units": ["dose_calculator"]},
+                     "check": {"type": "number", "value": 336, "unit": "h"}}}
+    done = row("t12", answer="Son 336 h", core=True)
+    results = {"m": {"config": {}, "rows": [
+        {**done, "tools_used": ["dose_calculator"], "auto_tools": ["search_knowledge_base"],
+         "required_tools_used": False},
+        {**done, "tools_used": ["search_knowledge_base"], "required_tools_used": False},
+        {**done, "required_tools_used": False},  # an old report: no tools saved, left as it is
+    ]}}
+    rows = rescore(results, tasks)["m"]["rows"]
+    assert [r["required_tools_used"] for r in rows] == [True, False, False]
+    assert [r.get("required_tools_used_strict") for r in rows] == [False, False, None]
+

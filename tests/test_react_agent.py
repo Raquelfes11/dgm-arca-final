@@ -511,12 +511,12 @@ def test_requested_tool_not_called_is_reminded_once(monkeypatch, tmp_path):
 
     done = call("final_answer", {"answer": "Hoja generada en /tmp/x.pdf"})
     agent = make([done, call("create_preparation_sheet", sheet), call("final_answer", {"answer": "Hecho."})])
-    response = agent.run("genera la hoja de preparación de X")
+    response = agent.run("genera la hoja de preparación de X", brain="base")
     assert "no has" in response.steps[0].observation.lower()  # the reminder
     assert list(tmp_path.glob("*.pdf")) and not response.warnings
 
     agent = make([done, done])  # it insists: second time the answer is accepted, with the warning
-    response = agent.run("genera la hoja de preparación de X")
+    response = agent.run("genera la hoja de preparación de X", brain="base")
     assert response.final_answer.startswith("AVISO") and response.warnings
 
 
