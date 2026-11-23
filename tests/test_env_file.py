@@ -1,5 +1,6 @@
 """The .env file: every variable the code reads is documented, and the agent loads it."""
 
+import os
 import re
 import subprocess
 import sys
@@ -44,3 +45,18 @@ def test_importing_the_agent_and_the_rag_loads_the_env_file():
     after_agent, after_rag = map(int, result.stdout.split()[-2:])
     assert after_agent >= 1  # the agent loads it
     assert after_rag > after_agent  # and so does rag.generate, which reads it at import time
+
+
+def test_max_new_tokens_of_the_local_brains_comes_from_the_environment():
+    def value(env: dict) -> str:
+        code = "import agent.react_agent as a; print(a.MAX_NEW_TOKENS, a.MAX_NEW_TOKENS_VLLM)"
+        result = subprocess.run(
+            [sys.executable, "-c", code], cwd=ROOT, capture_output=True, text=True, timeout=300,
+            env={**os.environ, **env},
+        )
+        assert result.returncode == 0, result.stderr[-800:]
+        return result.stdout.split()[-2:]
+
+    assert value({"ARCA_MAX_NEW_TOKENS": "4096"}) == ["4096", "4096"]
+    assert value({"ARCA_MAX_NEW_TOKENS": "256"}) == ["256", "4096"]  # the vllm limit is its own
+

@@ -3535,8 +3535,6 @@ Hay otra tarea que el `vllm` responde mal, o24. Se planteó pensando que el agen
 
 ---
 
----
-
 ### 2026-11-23 · Proyecto final · Herramientas requeridas con alternativas (éxito fiel)
 
 **Qué queríamos saber.** Si el éxito fiel del `vllm` estaba infravalorado por el criterio
@@ -3574,3 +3572,63 @@ del agente. Dejamos la decisión sobre t14, t15, o14 y o15 abierta: el `vllm` no
 aunque el enunciado se lo pida, y como esos datos están en la base de conocimiento el resultado es correcto.
 Si se quisiera aceptarlo, bastaría añadir `{"search_medication_cima": ["search_knowledge_base"]}` a
 esas dos tareas (no a o14 y o15, cuyos fármacos no están en el corpus).
+
+---
+
+### 2026-11-23 · Proyecto final · Repeticiones de `thinking` y límite de tokens
+
+**Qué queríamos saber.** Dos cosas. Cuánto cambia el resultado de `thinking` entre ejecuciones del mismo
+agente, para saber cuántas tareas de diferencia hacen falta para decir que algo ha cambiado. Y si el
+límite de tokens de los cerebros locales (1024, frente a los 4096 del `vllm`) explica parte de la
+distancia con el `vllm`, que comparamos con límites distintos.
+
+**Qué hicimos.** Hicimos el límite de tokens configurable con la variable `ARCA_MAX_NEW_TOKENS`, que vale
+1024 si no se define, y la guardamos en el `config` de cada informe. Ejecutamos `thinking` tres veces con 1024
+y una con 4096, en `tasks.jsonl` y en `tasks_ood.jsonl`, con el comando
+```
+make bench FIX=repeticiones LABEL=tasks_1024_a BRAINS=thinking
+make bench FIX=repeticiones LABEL=ood_4096_a BRAINS=thinking ARCA_MAX_NEW_TOKENS=4096 BENCH=agent/bench/tasks_ood.jsonl
+```
+(y las demás combinaciones). Para juntar las ejecuciones añadimos `agent/aggregate_runs.py`, que da la
+media y el rango de cada métrica y cuenta las tareas que se aciertan siempre, a veces o nunca:
+```
+python -m agent.aggregate_runs --brain thinking --group tasks_1024 <tres informes> --group tasks_4096 <informe> ...
+```
+El resultado está en `reports/fix/repeticiones/resumen.md`.
+
+**Qué pasó.** Cada celda es la media de las ejecuciones y, entre corchetes, el valor más bajo y el más alto.
+
+| Métrica | tasks, 1024 (3 ejec.) | tasks, 4096 (1 ejec.) | OOD, 1024 (3 ejec.) | OOD, 4096 (1 ejec.) |
+|---|---|---|---|---|
+| Éxito en las tareas principales | 67 % [65-70 %] | 70 % | 47 % [40-50 %] | 40 % |
+| Éxito fiel | 15 % [15-15 %] | 20 % | 8 % [5-10 %] | 15 % |
+| Casos de borde acertados | 73 % [60-80 %] | 100 % | 53 % [40-60 %] | 60 % |
+| Pasos sin llamada válida | 5 % [0-12 %] | 0 % | 13 % [11-14 %] | 5 % |
+| Correcto y trazable | 59 % [56-61 %] | 61 % | 46 % [39-50 %] | 39 % |
+| Tokens medios | 11113 | 11456 | 14041 | 13349 |
+| Latencia media por tarea | 86 s | 98 s | 84 s | 97 s |
+
+| Tareas principales | tasks, 1024 | tasks, 4096 | OOD, 1024 | OOD, 4096 |
+|---|---|---|---|---|
+| Acertadas en todas las ejecuciones | 13 | 14 | 8 | 8 |
+| Acertadas solo en algunas | 1 | - | 2 | - |
+| Falladas en todas | 6 | 6 | 10 | 12 |
+
+Entre ejecuciones con el mismo límite cambia como mucho una tarea en `tasks.jsonl` y dos en el OOD. Con
+4096 tokens el éxito de `thinking` es el mismo (70 % y 40 %, dentro del rango de 1024). Los tokens medios
+por tarea tampoco suben, lo que sugiere que el límite de 1024 casi nunca corta una respuesta. La latencia sale
+mucho más alta que en el informe del banco OOD (unos 85 s frente a 24 s) con los mismos tokens, porque
+depende de la GPU de cada sesión.
+
+**Qué concluimos.** Las tres ejecuciones se hicieron en la misma DGX, así que el rango solo recoge la
+variación dentro de una máquina. Entre sesiones vimos antes unas 3 tareas de variación, y esa es la que
+conviene usar como margen en el informe. Aun así, la caída de `thinking` de 67 % a 47 % entre
+`tasks.jsonl` y el OOD son unas 4 tareas, más que el ruido medido, así que el banco OOD es de verdad más
+difícil para `thinking`. Con estos datos no podemos decir si es por dificultad del banco o porque el prompt
+se ajustó a las tareas de `tasks.jsonl`. Dos de los ejemplos del prompt usan fármacos que también están en
+ese banco (amikacina y noradrenalina), y se puede probar a cambiarlos.
+
+El límite de tokens no explica la distancia con el `vllm`: con los mismos 4096 tokens, `thinking` sigue en 70 %
+y 40 %, frente a 100 % y 95 % del `vllm`. La diferencia viene del modelo. Las tareas que `thinking` falla siempre
+son 6 en `tasks.jsonl` y entre 10 y 12 en el OOD, y no se arreglan con más tokens, así que es ahí donde
+tiene sentido entrenar con las trazas del `vllm`.
