@@ -3534,3 +3534,43 @@ Hay otra tarea que el `vllm` responde mal, o24. Se planteó pensando que el agen
 **Qué concluimos.** Sobre las tareas OOD el orden de los modelos se mantiene y el `vllm` sigue siendo el que mejor funciona. Los cerebros `base`, `rlm` y `thinking` sí habían hecho overfitting sobre las tareas de `tasks.jsonl`, porque su tasa de éxito cae casi a la mitad en el banco OOD. El `vllm` mantiene una tasa de éxito más o menos constante en los dos bancos. De las dos tareas que falla, una es un error de diseño del banco (o24) y la otra, un problema de recuperación (o16). Para o16 creemos que se resolvería añadiendo a la cabecera de cada chunk el nombre del principio activo además del nombre comercial; y por lo visto en las demás tareas, con más pasos el agente podría haber llegado a responderla, y además correctamente. Para o24 hay que rediseñarla con un medicamento que no esté en el corpus antes de usar los casos de borde para comparar.
 
 ---
+
+---
+
+### 2026-11-23 · Proyecto final · Herramientas requeridas con alternativas (éxito fiel)
+
+**Qué queríamos saber.** Si el éxito fiel del `vllm` estaba infravalorado por el criterio
+`required_tools`. En las entradas del vLLM y del banco OOD vimos que varias tareas correctas no
+contaban como fieles porque el agente resolvía la conversión de unidades con `dose_calculator` y no
+llamaba a `convert_units`, que estaba en `required_tools`. Lo que queremos comprobar con ese criterio es
+que no haga las cuentas de cabeza, y en esos casos no las hace.
+
+**Qué hicimos.** Añadimos un campo opcional `tool_alternatives` a las tareas, que asocia una herramienta
+requerida con las que valen en su lugar en esa tarea. Lo pusimos solo donde la conversión es un factor de
+escala: t10 y t12 en `tasks.jsonl`, y o09, o10, o11, o12 y o20 en `tasks_ood.jsonl`, con
+`{"convert_units": ["dose_calculator"]}`. Las tareas de borde no lo llevan y las de CIMA (t14, t15, o14
+y o15) tampoco, porque el enunciado pide consultar CIMA y no es lo mismo que leer la base de
+conocimiento. El comprobador es `required_tools_met` en `agent/evaluate.py`; `required_tools_used` usa las
+alternativas y `required_tools_used_strict` guarda el criterio anterior. `agent.rescore` vuelve a calcular
+los dos campos a partir de las herramientas guardadas en cada fila, y `agent.validate_bench` comprueba que el
+campo esté bien formado. No cambia ninguna tarea, ningún check ni el agente.
+
+Para ver el efecto sobre los informes que ya teníamos:
+```
+uv run python -m agent.rescore --report reports/fix/vllm/fixvllm_vllm_added_for_comparison.json --out reports/fix/tool_alternatives/vllm_rescored.json
+uv run python -m agent.rescore --report reports/fix/ood/fixood_cuatro_cerebros.json --bench agent/bench/tasks_ood.jsonl --out reports/fix/tool_alternatives/ood_rescored.json
+```
+
+**Qué pasó.** El éxito fiel del `vllm` sube de 17/20 a 18/20 en `tasks.jsonl` (t12) y de 15/20 a 19/20 en
+`tasks_ood.jsonl` (o09, o10, o11 y o20). Las tareas correctas que siguen sin contar como fieles son t14 y t15 en
+`tasks.jsonl`, y en el OOD solo falla o16, que no llega a responder. En `thinking` sube una tarea en tres
+de sus informes. La tasa de éxito de ningún cerebro cambia, porque solo se modifica qué se considera
+haber usado las herramientas. Los valores salen de `agent.rescore` y `agent.analyze_eval` sobre los informes
+guardados, en `reports/fix/tool_alternatives/`. En el OOD `thinking` pasa de 2/20 a 3/20 de éxito fiel y los
+otros cerebros no cambian.
+
+**Qué concluimos.** El éxito fiel del `vllm` en el OOD es 95 % y no 75 %, y la diferencia era del criterio y no
+del agente. Dejamos la decisión sobre t14, t15, o14 y o15 abierta: el `vllm` no llama a CIMA en t14 y t15
+aunque el enunciado se lo pida, y como esos datos están en la base de conocimiento el resultado es correcto.
+Si se quisiera aceptarlo, bastaría añadir `{"search_medication_cima": ["search_knowledge_base"]}` a
+esas dos tareas (no a o14 y o15, cuyos fármacos no están en el corpus).

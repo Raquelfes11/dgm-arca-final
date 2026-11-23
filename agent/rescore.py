@@ -5,8 +5,10 @@
 
 The report keeps the final answer of every task, so when the way of checking an answer changes
 (a better regular expression, a stricter number check) the old runs can be scored again instead
-of being run again. Only "correct" and "check" change in each row; the steps, the tools used and
-the tokens stay as they were. The result is written next to the report (name_rescored.json) and
+of being run again. Only "correct", "check" and the required tools fields change in each row (the
+required tools are looked at again with the tool_alternatives of the task); the steps, the tools
+used and the tokens stay as they were. For a report of the OOD benchmark pass
+--bench agent/bench/tasks_ood.jsonl. The result is written next to the report (name_rescored.json) and
 can be read with agent.analyze_eval.
 
 The summaries add success_rate_lax and lucky_hits (right in lax, wrong in strict), which is
@@ -19,7 +21,18 @@ import argparse
 import json
 from pathlib import Path
 
-from agent.evaluate import check_answer, summarise_brain, citation_report
+from agent.evaluate import check_answer, citation_report, required_tools_met, summarise_brain
+
+
+def _required_tools_fields(task: dict, row: dict) -> dict:
+    """The required tools fields of a row, looked at again; empty if the row has no tools saved."""
+    if "tools_used" not in row:  # a report from before the tools were saved: keep what it says
+        return {}
+    used = set(row["tools_used"]) | set(row.get("auto_tools", []))
+    return {
+        "required_tools_used": required_tools_met(task, used),
+        "required_tools_used_strict": set(task.get("required_tools", [])) <= used,
+    }
 
 
 def rescore(results: dict, tasks: dict[str, dict], mode: str = "strict") -> dict:
@@ -41,9 +54,11 @@ def rescore(results: dict, tasks: dict[str, dict], mode: str = "strict") -> dict
             answer = row.get("final_answer") or "" 
             correct = answered and check_answer(task, answer, mode)
             report = citation_report(task, answer, row.get("steps"))
+            tools = _required_tools_fields(task, row)
             rows.append(
                 {
                     **row,
+                    **tools,
                     "check": task["check"],
                     "core": task.get("core", row.get("core", True)),
                     "correct_original": original,

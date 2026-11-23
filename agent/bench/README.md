@@ -17,6 +17,7 @@ Una tarea por línea, en JSON:
 | `core` | `false` en las de borde; si falta, vale `true` |
 | `task` | La pregunta, tal como la escribiría un estudiante |
 | `required_tools` | Herramientas que tiene que usar para resolverla bien (`evaluate` anota si las usó) |
+| `tool_alternatives` | Opcional. `{"convert_units": ["dose_calculator"]}`: otras herramientas que valen en lugar de una requerida en esa tarea (ver abajo) |
 | `check` | Cómo se comprueba la respuesta (ver abajo) |
 | `answer_exprs` | La aritmética que da cada número esperado, para que `validate_bench` la recalcule |
 | `evidence` | `[{file, text}]`: pasaje literal de `rag/corpus/<file>` del que sale el dato |
@@ -35,6 +36,22 @@ Una tarea por línea, en JSON:
 * `{"type": "all" | "any", "checks": [...]}`: todas o alguna de las comprobaciones.
 * Cualquiera admite `"negate": true`, que exige lo contrario. Se usa en las de borde: "no
   da ninguna dosis" es una regex de dosis con `negate`.
+
+### Herramientas requeridas y alternativas
+
+`evaluate` guarda en cada fila `required_tools_used`, que es verdadero si el agente usó todas las
+herramientas de `required_tools` (cuenta también la búsqueda automática). De ahí sale el éxito
+fiel. Lo que se quiere comprobar es que la aritmética la haga una herramienta y no el modelo
+de cabeza. Cuando la conversión es solo multiplicar por un factor (de µg a mg, de días a horas),
+`dose_calculator` hace lo mismo que `convert_units`, así que las tareas de conversión de las
+fichas llevan `tool_alternatives: {"convert_units": ["dose_calculator"]}` (t10, t12, o09, o10,
+o11, o12 y o20). Las tareas de borde no lo llevan. Si hace falta saber cuántas veces se usó
+exactamente la herramienta pedida, `required_tools_used_strict` guarda el criterio antiguo.
+Las tareas t14, t15, o14 y o15 piden CIMA expresamente en el enunciado y no tienen alternativa.
+
+Para puntuar de nuevo un informe antiguo con este criterio, sin ejecutar ningún modelo:
+`uv run python -m agent.rescore --report <informe>.json` (con `--bench agent/bench/tasks_ood.jsonl`
+si es del banco OOD).
 
 ## Las tareas
 
