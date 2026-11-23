@@ -53,6 +53,22 @@ Para puntuar de nuevo un informe antiguo con este criterio, sin ejecutar ningún
 `uv run python -m agent.rescore --report <informe>.json` (con `--bench agent/bench/tasks_ood.jsonl`
 si es del banco OOD).
 
+### Tareas de entrenamiento
+
+`tasks_train.jsonl` (ids `x001` en adelante, campo `"split": "train"`) no es un banco de evaluación: son
+las tareas con las que se generan las trazas para entrenar al agente. Tienen el mismo formato y se
+validan igual, pero usan solo los 19 fármacos del corpus que no aparecen ni en `tasks.jsonl` ni en
+`tasks_ood.jsonl`, así que lo que aprende el agente es el procedimiento (buscar, calcular, citar) y no los
+datos de las tareas de prueba. No se tocan a mano: las genera `agent/make_train_tasks.py`, a partir de
+frases literales de las fichas, y `tests/test_train_tasks.py` comprueba que coinciden con el fichero,
+que pasan la validación y que no repiten fármacos ni enunciados de los dos bancos. Nunca se evalúa
+sobre ellas.
+
+```bash
+uv run python -m agent.make_train_tasks
+uv run python -m agent.validate_bench --bench agent/bench/tasks_train.jsonl
+```
+
 ## Las tareas
 
 * **t01–t09** (`ficha_calculo`): se busca la dosis en la ficha y se calcula con el peso o la
