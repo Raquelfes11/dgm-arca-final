@@ -1,5 +1,7 @@
 """agent.train_sft without torch: the examples, the split and the padding."""
 
+import pytest
+
 from agent.train_sft import (
     END_OF_TURN,
     build_examples,
@@ -8,6 +10,7 @@ from agent.train_sft import (
     length_report,
     pad_batch,
     split_by_group,
+    tail_loss,
     warmup_steps,
 )
 
@@ -98,3 +101,28 @@ def test_padding_goes_on_the_right_and_is_out_of_the_loss():
 def test_warmup_is_five_percent_with_a_minimum_of_one():
     assert warmup_steps(230, 1, 8, 3.0) == 4  # 29 steps per epoch, 87 in total
     assert warmup_steps(4, 1, 8, 1.0) == 1
+
+
+def test_tail_loss_equals_the_loss_over_the_whole_sequence_with_the_prompt_masked():
+    torch = pytest.importorskip("torch")
+    torch.manual_seed(0)
+    vocab, length, n = 11, 9, 3
+    table = torch.randn(vocab, vocab)  # next-token logits depend on the current token
+    input_ids = torch.randint(0, vocab, (1, length))
+    labels = input_ids.clone()
+    labels[:, : length - n] = -100
+    kept = {}
+
+    def model(input_ids, attention_mask, logits_to_keep):
+        kept["n"] = logits_to_keep
+        full = table[input_ids]  # (1, length, vocab)
+        return type("Out", (), {"logits": full[:, -logits_to_keep:]})()
+
+    inputs = {"input_ids": input_ids, "attention_mask": torch.ones_like(input_ids), "labels": labels}
+    loss, _ = tail_loss(model, inputs)
+    full = table[input_ids]
+    expected = torch.nn.functional.cross_entropy(full[0, :-1], labels[0, 1:], ignore_index=-100)
+    assert kept["n"] == n + 1  # only the completion and the position before it
+    assert torch.allclose(loss, expected, atol=1e-6)
+    summed, _ = tail_loss(model, inputs, num_items_in_batch=n * 4)  # four accumulated micro-batches
+    assert torch.allclose(summed, expected * n / (n * 4), atol=1e-6)

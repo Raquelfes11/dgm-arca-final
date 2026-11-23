@@ -144,6 +144,35 @@ def warmup_steps(n_examples: int, batch_size: int, grad_accum: int, epochs: floa
     return max(1, round(fraction * steps_per_epoch * epochs))
 
 
+def tail_loss(model, inputs: dict, num_items_in_batch=None):
+    """Cross entropy of the completion only, computing the logits only for its positions.
+
+    The vocabulary has 152000 tokens, so the logits of a whole prompt of 6000 tokens take several
+    GiB, and the loss would run out of memory in a 16 GiB GPU. The completion is always the end of
+    the sequence, so the model is asked for the logits of its last positions only (logits_to_keep).
+    It works with a batch of one example (no padding), which is how the training runs. When the
+    trainer gives num_items_in_batch the loss is the sum divided by it, as the trainer expects
+    with gradient accumulation; without it (evaluation) it is the mean.
+    """
+    import torch
+
+    labels = inputs["labels"]
+    assert labels.shape[0] == 1, "tail_loss works with one example per batch"
+    n = int((labels[0] != -100).sum())
+    out = model(
+        input_ids=inputs["input_ids"], attention_mask=inputs["attention_mask"], logits_to_keep=n + 1
+    )
+    logits = out.logits[:, :-1].float()  # the last position predicts nothing
+    targets = inputs["input_ids"][:, -n:]
+    reduction = "mean" if num_items_in_batch is None else "sum"
+    loss = torch.nn.functional.cross_entropy(
+        logits.reshape(-1, logits.size(-1)), targets.reshape(-1), reduction=reduction
+    )
+    if num_items_in_batch is not None:
+        loss = loss / num_items_in_batch
+    return loss, out
+
+
 def plain_system(max_steps: int = 10) -> str:
     """The system prompt of the agent without the worked examples."""
     from agent.react_agent import ReActAgent
@@ -215,10 +244,11 @@ def train(args: argparse.Namespace) -> None:
         num_train_epochs=args.epochs,
         learning_rate=args.learning_rate,
         lr_scheduler_type="cosine",
-        warmup_steps=warmup_steps(len(train_set), args.batch_size, args.grad_accum, args.epochs),
-        per_device_train_batch_size=args.batch_size,
-        per_device_eval_batch_size=args.batch_size,
+        warmup_steps=warmup_steps(len(train_set), 1, args.grad_accum, args.epochs),
+        per_device_train_batch_size=1,
+        per_device_eval_batch_size=1,
         gradient_accumulation_steps=args.grad_accum,
+        prediction_loss_only=True,
         bf16=torch.cuda.is_available(),
         logging_steps=5,
         eval_strategy="epoch" if has_eval else "no",
@@ -230,7 +260,12 @@ def train(args: argparse.Namespace) -> None:
         report_to="none",
         remove_unused_columns=False,
     )
-    trainer = Trainer(
+    class TailTrainer(Trainer):
+        def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+            loss, out = tail_loss(model, inputs, num_items_in_batch)
+            return (loss, out) if return_outputs else loss
+
+    trainer = TailTrainer(
         model=model,
         args=config,
         train_dataset=Examples(train_set),
@@ -261,7 +296,6 @@ def build_parser() -> argparse.ArgumentParser:
                         help="keep the system prompt of the traces, or use the one without examples")
     parser.add_argument("--epochs", type=float, default=3.0)
     parser.add_argument("--learning-rate", type=float, default=1e-4)
-    parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--grad-accum", type=int, default=8)
     parser.add_argument("--max-length", type=int, default=8192)
     parser.add_argument("--lora-rank", type=int, default=16)
