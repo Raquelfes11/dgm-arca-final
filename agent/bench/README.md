@@ -64,6 +64,15 @@ frases literales de las fichas, y `tests/test_train_tasks.py` comprueba que coin
 que pasan la validación y que no repiten fármacos ni enunciados de los dos bancos. Nunca se evalúa
 sobre ellas.
 
+Las trazas se generan con `agent/generate_traces.py` (un modelo grande por vLLM, una pasada por tarea) y
+solo se guardan las que cumplen el `check` de la tarea, usan las herramientas requeridas, citan bien y
+tienen un formato limpio. Esa criba encontró tareas mal planteadas, que se corrigieron o se quitaron:
+la ficha de piperacilina/tazobactam tiene la tabla de dosis infantiles aplanada (la dosis aparece antes
+de su indicación) y el modelo la lee al revés, así que esas tareas se excluyen (los ids de las demás no
+cambian, por eso hay huecos); y el potasio, el meropenem y las sumas de dos fármacos tenían un enunciado
+ambiguo (varias velocidades máximas en la ficha, varias dosis, o sumar también cilastatina y ácido
+clavulánico).
+
 ```bash
 uv run python -m agent.make_train_tasks
 uv run python -m agent.validate_bench --bench agent/bench/tasks_train.jsonl

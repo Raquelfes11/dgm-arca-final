@@ -35,6 +35,11 @@ CEFOTAXIMA_NINOS = ("cefotaxima_57720.md", "reciben de 50 a 100 mg de cefotaxima
 CEFOTAXIMA_ADULTOS = ("cefotaxima_57720.md", "generalmente reciben de 1 a 2 g de cefotaxima cada 12 horas")
 ERTAPENEM = ("ertapenem_02216001.md", "la dosis de INVANZ es de 15 mg/kg, administrados dos veces al día (no exceder 1 g/día)")
 PIPERACILINA_NINOS = ("piperacilina_68080.md", "80 mg de piperacilina/10 mg de tazobactam por kg de peso corporal/cada 6 horas")
+# The data sheet of piperacilina/tazobactam has the table of children's doses flattened: each dose
+# line comes before its indication line, and the teacher model reads the pairs the other way
+# round (100 mg/kg for the neutropenic child). The text alone does not settle it, so no task
+# built on this evidence is kept. The ids of the other tasks do not change.
+EXCLUDED_EVIDENCE = {PIPERACILINA_NINOS}
 PIPERACILINA_ADULTOS = ("piperacilina_68080.md", "La dosis habitual es de 4 g de piperacilina/0,5 g de tazobactam administrados cada 8 horas")
 AMOXICILINA_NINOS = ("amoxicilina_65131.md", "Niños de 3 meses o más: 25 mg/5 mg por kg de peso cada 8 horas")
 AMOXICILINA_ADULTOS = ("amoxicilina_65131.md", "Para el tratamiento de infecciones indicadas en la sección 4.1: 1.000 mg/200 mg cada 8 horas")
@@ -121,8 +126,8 @@ PER_KG = [
          clause="un paciente de {w} kg recibe bicarbonato sódico a la velocidad máxima (en mL/h)"),
     dict(id="potasio", evidence=[POTASIO], expr="0.15 * {w}", units=["mmol/h", "mmol/hora"],
          weights=[40, 45, 50, 55, 60, 65],  # up to 65 kg: above that 0.15 mmol/kg/h passes the 10 mmol/h of the data sheet
-         texts=["Un paciente de {w} kg recibe cloruro de potasio en perfusión a la velocidad máxima por kg de peso que indica la ficha técnica. ¿Cuántos mmol de potasio por hora recibe?",
-                "Según la ficha técnica, ¿cuántos mmol/h de potasio es la velocidad máxima de perfusión de cloruro de potasio para un paciente de {w} kg?"],
+         texts=["Un paciente de {w} kg recibe cloruro de potasio en perfusión como suplemento de la nutrición parenteral, a la velocidad máxima por kg de peso que indica la ficha técnica para ese uso. ¿Cuántos mmol de potasio por hora recibe?",
+                "Según la ficha técnica, ¿cuántos mmol/h de potasio es la velocidad máxima de perfusión de cloruro de potasio como suplemento de la nutrición parenteral para un paciente de {w} kg?"],
          clause="un paciente de {w} kg recibe cloruro de potasio a la velocidad máxima (en mmol/h)"),
 ]
 
@@ -141,7 +146,7 @@ FIXED = [
          text="Un adulto con una infección muy grave por un microorganismo poco sensible recibe imipenem/cilastatina con la pauta que indica la ficha técnica para esos casos. ¿Cuántos mg de imipenem recibe en 24 horas?",
          clause="imipenem/cilastatina con la pauta de la ficha técnica para infecciones muy graves por microorganismos poco sensibles"),
     dict(id="meropenem", evidence=[MEROPENEM], expr="1 * 3", units=["g", "g/día"],
-         text="Un adulto con una infección complicada del tracto urinario recibe meropenem con la dosis más alta de la ficha técnica, cada 8 horas. ¿Cuántos g de meropenem recibe al día?"),
+         text="Un adulto con una infección complicada del tracto urinario recibe meropenem con la dosis más alta que la ficha técnica indica para esa infección, cada 8 horas. ¿Cuántos g de meropenem recibe al día?"),
     dict(id="piperacilina_adultos", evidence=[PIPERACILINA_ADULTOS], expr="4 * 3", units=["g", "g/día"],
          text="Un adulto recibe la dosis habitual de piperacilina/tazobactam de la ficha técnica. ¿Cuántos g de piperacilina recibe en 24 horas?"),
     dict(id="amoxicilina_adultos", evidence=[AMOXICILINA_ADULTOS], expr="1000 * 3", units=["mg", "mg/día"],
@@ -188,7 +193,7 @@ def _task(number: int, category: str, text: str, expr: str, units: list[str], ev
 
 
 def build_tasks() -> list[dict]:
-    """Every training task, in a fixed order, with ids x001, x002, ..."""
+    """Every training task, in a fixed order, with ids x001, x002, ... (the excluded ones leave a gap)."""
     pending = []  # (category, text, expr, units, evidence, tools, conversion, tolerance)
     for fact in PER_KG + PER_VOLUME:
         for i, w in enumerate(fact["weights"]):
@@ -203,7 +208,8 @@ def build_tasks() -> list[dict]:
     daily = [f for f in FIXED if f["units"] == ["mg", "mg/día"] and "clause" in f]
     for a, b in itertools.combinations(daily, 2):
         text = (f"Un adulto recibe en 24 horas {a['clause']} y otro adulto recibe {b['clause']}. "
-                "Según sus fichas técnicas, ¿cuántos mg de antibiótico suman en total las dos dosis diarias?")
+                "Según sus fichas técnicas, ¿cuántos mg suman en total las dos dosis diarias? Cuenta solo el antibiótico principal "
+                "de cada una: no sumes la cilastatina ni el ácido clavulánico.")
         conversion = a.get("conversion", False) or b.get("conversion", False)
         pending.append(("dos_fichas", text, f"({a['expr']}) + ({b['expr']})", ["mg"], a["evidence"] + b["evidence"],
                         [KB, CALC, CONVERT] if conversion else [KB, CALC], conversion, None))
@@ -218,7 +224,8 @@ def build_tasks() -> list[dict]:
                 "súmalas. " + "; ".join(parts) + ". ¿Cuántos mg suman en total los tres pacientes?")
         expr = " + ".join(f"({f['expr'].format(w=w)})" for f, w in zip(trio, weights))
         pending.append(("larga", text, expr, ["mg"], [e for f in trio for e in f["evidence"]], [KB, CALC], False, None))
-    return [_task(i, *args) for i, args in enumerate(pending, 1)]
+    tasks = [_task(i, *args) for i, args in enumerate(pending, 1)]
+    return [t for t in tasks if not any((e["file"], e["text"]) in EXCLUDED_EVIDENCE for e in t["evidence"])]
 
 
 def main() -> None:

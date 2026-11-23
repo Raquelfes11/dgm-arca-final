@@ -60,6 +60,16 @@ def append_jsonl(path: str | Path, row: dict) -> None:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+def drop_ids(path: str | Path, ids: set[str]) -> int:
+    """Remove from a JSONL file the rows whose id is in ids. Returns how many were removed."""
+    path = Path(path)
+    rows = read_jsonl(path)
+    kept = [r for r in rows if r["id"] not in ids]
+    if len(kept) != len(rows):
+        path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in kept), encoding="utf-8")
+    return len(rows) - len(kept)
+
+
 def recording(agent):
     """Make agent.generate keep every call: the prompt it got and the raw text it returned.
 
@@ -223,6 +233,10 @@ def main() -> None:
     parser.add_argument("--brain", default="vllm")
     parser.add_argument("--ids", nargs="+", default=None, help="run only these task ids")
     parser.add_argument("--limit", type=int, default=None, help="run only the first N pending tasks")
+    parser.add_argument(
+        "--redo", action="store_true",
+        help="run again the tasks of --ids even if they are in the log (their old rows are removed)",
+    )
     parser.add_argument("--max-steps", type=int, default=10)
     parser.add_argument("--max-raw-chars", type=int, default=MAX_RAW_CHARS)
     parser.add_argument("--rag-mode", choices=["auto", "tool", "off"], default="auto")
@@ -244,9 +258,18 @@ def main() -> None:
 
     from agent.react_agent import ReActAgent
 
+    if args.redo and not args.ids:
+        parser.error("--redo needs --ids: it would run every task again")
     tasks = read_jsonl(args.bench)
+    # rows of tasks that are no longer in the bench (or that are being redone) are removed
+    stale = {r["id"] for r in read_jsonl(args.log)} - {t["id"] for t in tasks}
     if args.ids:
         tasks = [t for t in tasks if t["id"] in set(args.ids)]
+    remove = stale | ({t["id"] for t in tasks} if args.redo else set())
+    for path in (args.log, args.out):
+        drop_ids(path, remove)
+    if remove:
+        print(f"quitadas del log y de las trazas: {sorted(remove)}", flush=True)
     done = {r["id"] for r in read_jsonl(args.log)}
     pending = [t for t in tasks if t["id"] not in done]
     if args.limit:

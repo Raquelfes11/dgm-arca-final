@@ -58,3 +58,11 @@ def test_no_training_task_repeats_the_text_of_a_benchmark_task():
                     reason="the corpus is not downloaded")
 def test_the_tasks_pass_the_benchmark_validation():
     assert validate(build_tasks(), CORPUS, TOOLS) == []
+
+
+def test_ambiguous_evidence_is_left_out_and_ids_stay_stable():
+    tasks = build_tasks()
+    assert not [t for t in tasks if "piperacilina_68080.md" in {e["file"] for e in t["evidence"]}
+                and any("80 mg de piperacilina/10 mg" in e["text"] for e in t["evidence"])]
+    ids = [int(t["id"][1:]) for t in tasks]
+    assert ids == sorted(ids) and ids[-1] > len(ids)  # there are gaps: nothing was renumbered

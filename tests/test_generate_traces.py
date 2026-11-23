@@ -5,6 +5,7 @@ import json
 from agent.generate_traces import (
     append_jsonl,
     clean_reason,
+    drop_ids,
     judge,
     read_jsonl,
     recording,
@@ -132,3 +133,13 @@ def test_jsonl_helpers_and_summary(tmp_path):
     append_jsonl(path, {"id": "b", "reason": "incorrect"})
     assert [r["id"] for r in read_jsonl(path)] == ["a", "b"]
     assert summarise_log(read_jsonl(path)).startswith("1/2 trazas aceptadas")
+
+
+def test_drop_ids_removes_only_those_rows(tmp_path):
+    path = tmp_path / "traces.jsonl"
+    for name in ("a", "b", "c"):
+        append_jsonl(path, {"id": name})
+    assert drop_ids(path, {"b", "z"}) == 1
+    assert [r["id"] for r in read_jsonl(path)] == ["a", "c"]
+    assert drop_ids(path, {"z"}) == 0
+    assert drop_ids(tmp_path / "missing.jsonl", {"a"}) == 0  # no file, nothing to remove
