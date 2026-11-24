@@ -326,7 +326,12 @@ def main() -> None:
         action="store_true",
         help="leave out CIMA, convert_units, dose_calculator and the sheet tool",
     )
-    parser.add_argument("--few-shot", type=bool, default=True)
+    parser.add_argument(
+        "--few-shot",
+        type=lambda text: text.lower() not in ("0", "false", "no"),  # type=bool would make "False" True
+        default=True,
+        help="True (default) or False: the system prompt with the worked examples or without them",
+    )
     parser.add_argument("--check-mode", choices=["strict", "lax"], default="strict")
     args = parser.parse_args()
 

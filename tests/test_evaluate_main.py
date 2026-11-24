@@ -52,3 +52,23 @@ def test_main_runs_the_benchmark_and_writes_the_report(tmp_path, monkeypatch):
     assert first["tools_used"] == ["final_answer"]  # the automatic search is not the model's
     assert first["auto_tools"] == ["search_knowledge_base"]
     assert first["required_tools_used"] is False  # dose_calculator was never called
+
+
+def test_few_shot_flag_reads_false_as_false(tmp_path, monkeypatch):
+    bench = tmp_path / "bench.jsonl"
+    bench.write_text(json.dumps(TASKS[0]), encoding="utf-8")
+    seen = []
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *args, **kwargs: None)
+
+    def fake_from_env(cls, **kwargs):
+        seen.append(kwargs["few_shot"])
+        return FakeAgent()
+
+    monkeypatch.setattr("agent.react_agent.ReActAgent.from_env", classmethod(fake_from_env))
+    for value, expected in (("False", False), ("false", False), ("True", True), (None, True)):
+        argv = ["evaluate", "--bench", str(bench), "--brains", "thinking", "--out", str(tmp_path / "r.json")]
+        if value is not None:
+            argv += ["--few-shot", value]
+        monkeypatch.setattr(sys, "argv", argv)
+        evaluate.main()
+        assert seen[-1] is expected, value

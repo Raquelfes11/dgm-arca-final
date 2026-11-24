@@ -3632,3 +3632,120 @@ El límite de tokens no explica la distancia con el `vllm`: con los mismos 4096 
 y 40 %, frente a 100 % y 95 % del `vllm`. La diferencia viene del modelo. Las tareas que `thinking` falla siempre
 son 6 en `tasks.jsonl` y entre 10 y 12 en el OOD, y no se arreglan con más tokens, así que es ahí donde
 tiene sentido entrenar con las trazas del `vllm`.
+
+
+### 2026-11-24 · Proyecto final · SFT de `thinking` con trazas del `vllm`
+
+**Qué queríamos saber.** Si podemos mejorar al cerebro `thinking` (Qwen3-1.7B) entrenándolo con lo que hace
+el `vllm` (27B) en tareas de entrenamiento: buscar en la base de conocimiento, calcular con las herramientas,
+citar el fragmento y llamar a `final_answer`. Lo comparamos con el mismo `thinking` sin entrenar.
+
+**Qué hicimos.**
+
+1. *Tareas de entrenamiento.* `agent/make_train_tasks.py` genera `agent/bench/tasks_train.jsonl` (104 tareas:
+   91 de una ficha, 6 de dos fichas, 5 largas y 2 de conversión), con los mismos comprobadores del banco. Al
+   mirar por qué el `vllm` fallaba algunas, vimos que no eran errores del modelo sino enunciados mal puestos o
+   un fallo del corpus: en la ficha de piperacilina pediátrica las tablas están aplanadas y la dosis aparece
+   antes que su indicación, así que el retriever y el modelo la leen mal. Excluimos esa evidencia
+   (`EXCLUDED_EVIDENCE`, los ids quedan con huecos) y reescribimos los textos de potasio, meropenem y de las
+   sumas de dos fármacos ("cuenta solo el antibiótico principal de cada una"). Este fallo del corpus es un buen
+   ejemplo para el análisis de errores del informe.
+2. *Trazas.* `agent/generate_traces.py` ejecuta cada tarea una vez con el `vllm` (temperatura 0, así que repetir
+   daría la misma traza) y solo guarda la traza si cumple todo: respuesta correcta con el comprobador estricto,
+   herramientas requeridas (con alternativas), citas válidas y de la evidencia, formato limpio (todas las
+   llamadas con etiqueta, sin avisos ni llamadas repetidas ni resumen de memoria) y cada salida de menos de 3000
+   caracteres, para que `thinking` pueda reproducirla con su límite de 1024 tokens. Salieron 99 trazas de 104
+   (`agent/data/agent_traces.jsonl`, y el motivo de cada descarte en `agent_traces_log.jsonl`). Las cinco
+   rechazadas son x029 (un aviso de formato), x091 (sin la herramienta requerida) y las largas x106, x107 y
+   x109 (la memoria resumió la conversación). Solo quedan dos tareas largas (x110 y x112).
+3. *Entrenamiento.* `agent/train_sft.py`: un ejemplo por cada llamada al modelo, con el prompt renderizado con la
+   plantilla de chat de Qwen3 (`enable_thinking=True`) y la pérdida solo sobre lo que escribió el `vllm`. LoRA
+   r=16 en todas las capas lineales, tasa de aprendizaje 1e-4, 3 épocas, lote 1 con acumulación 8, y un 15 % de
+   las trazas apartado por fármaco completo (dos tareas del mismo fármaco solo difieren en el peso, y apartar una
+   y entrenar con su gemela haría la pérdida de validación demasiado optimista). Se entrena con el prompt sin
+   ejemplos, así que el agente se evalúa con `FEW_SHOT=False`. El primer intento se quedó sin memoria en la
+   entropía cruzada (vocabulario de 152k tokens, secuencias de unos 7k), y lo resolvimos calculando los logits
+   solo sobre la parte final (`logits_to_keep`). La pérdida de validación baja de 0,420 a 0,365 y 0,359
+   (entrenamiento 0,23). El adaptador está en `raquelfes11/dgm-arca-agent-sft-lora`.
+4. *Evaluación.* El modelo fusionado se evalúa en los dos bancos junto con un control, el mismo `thinking` sin
+   entrenar y también sin ejemplos en el prompt:
+```
+make bench FIX=agent_sft LABEL=sft_tasks BRAINS=thinking FEW_SHOT=False ARCA_THINKING_MODEL=rlm/weights/agent_sft_merged
+make bench FIX=agent_sft LABEL=control_ood BRAINS=thinking FEW_SHOT=False BENCH=agent/bench/tasks_ood.jsonl
+```
+   Como el modelo salía peor que el control, repetimos con los checkpoints de la época 1 y 2
+   (`agent/merge_adapter.py` los fusiona) para ver si era sobreajuste. Los informes están en
+   `reports/fix/agent_sft/`.
+
+**Qué pasó.** Cada celda es el número de tareas principales (de 20) en una sola ejecución. "Truncadas" son las
+tareas en las que algún paso llega al límite de 1024 tokens sin cerrar con una llamada.
+
+| | tasks: éxito | fiel | trazable | truncadas | OOD: éxito | fiel | trazable | truncadas |
+|---|---|---|---|---|---|---|---|---|
+| Control (sin entrenar, sin ejemplos) | 11 | 5 | 0 | 3 | 11 | 4 | 0 | 3 |
+| SFT, época 1 | 9 | 0 | 1 | 5 | 4 | 0 | 1 | 8 |
+| SFT, época 2 | 6 | 1 | 2 | 8 | 6 | 4 | 2 | 7 |
+| SFT, época 3 | 8 | 5 | 4 | 1 | 4 | 3 | 3 | 7 |
+
+La referencia con ejemplos en el prompt y sin entrenar es 67 % en `tasks.jsonl` y 47 % en el OOD (tres
+ejecuciones). La trazabilidad del control es 0 porque, sin ejemplos, acierta pero no cita (9 y 11 de las 18
+tareas que usan la base de conocimiento); el SFT de la época 3 cita bien el fragmento de la evidencia en 4 y 3.
+
+Al mirar los pasos sin llamada válida del SFT, casi todos son el mismo fallo: en el primer paso, justo después
+de la búsqueda automática, el `<think>` no se cierra y se repite (por ejemplo `= 240 mg/min = 240 mg/min = ...`)
+hasta agotar los 1024 tokens. Entonces el agente avisa de que falta la llamada, el modelo repite lo mismo (con
+temperatura 0 no puede hacer otra cosa) y se acaba la tarea. Cuando sí llega a escribir la llamada, usa bien la
+etiqueta (100 % de las llamadas) y cita bien. En la época 1 pasa otra cosa: el modelo aprende el formato pero no
+el hábito de calcular, y responde con `final_answer` haciendo la cuenta de cabeza (éxito fiel 0/20 en los dos
+bancos).
+
+Para saber si los pasos truncados eran bucles o razonamiento largo, repetimos el OOD con 2048 tokens
+(`ARCA_MAX_NEW_TOKENS=2048`) para el SFT de la época 3 y para el control:
+
+| OOD, 2048 tokens | éxito | fiel | trazable (de 18) | no llega a respuesta | latencia media |
+|---|---|---|---|---|---|
+| Control | 11 | 4 | 0 | 0 | 97 s |
+| SFT, época 3 | 9 | 8 | 6 | 7 | 130 s |
+
+El SFT recupera cinco tareas respecto a 1024 (de 4 a 9), así que parte de lo que parecían bucles era razonamiento
+largo. El éxito fiel pasa a ser el doble que el del control (8 frente a 4) y 6 respuestas son correctas y
+trazables, frente a ninguna del control. Aun así, en 6 tareas (o01, o07, o09, o12, o17 y o19) un paso sigue sin
+cerrarse con más de 5000 caracteres, y en tres de ellas (o07, o12 y o17) el texto es muy repetitivo (menos de 25 palabras
+distintas en las últimas 80), así que los bucles existen aunque son menos de los que parecían. El control no tiene
+ninguna. El control da el mismo éxito (11) con los dos límites.
+
+Repetimos lo mismo en `tasks.jsonl`:
+
+| `tasks.jsonl`, 2048 tokens | éxito | fiel | trazable (de 18) | no llega a respuesta | latencia media |
+|---|---|---|---|---|---|
+| Control | 12 | 3 | 0 | 2 | 96 s |
+| SFT, época 3 | 7 | 4 | 4 | 10 | 110 s |
+
+Aquí el límite de 2048 no recupera nada (el SFT tenía 8 con 1024 y tiene 7), y la distancia con el control es de
+cinco tareas. La causa es otra. Solo en tres tareas (t01, t10 y t16) un paso se queda sin cerrar; en seis tareas
+el modelo hace la misma llamada a una herramienta una y otra vez hasta que el agente la corta con el aviso de
+llamada repetida y el de bucle. Por ejemplo, en t02 calcula bien `15 * 60 / 2 = 450` en el primer paso y repite
+exactamente esa llamada en los dos siguientes sin llamar nunca a `final_answer`; en t05 pasa lo mismo con
+`1050 / 50 = 21`. En esas dos tareas el valor correcto ya estaba calculado y la tarea se pierde solo por no
+entregarlo. Este segundo fallo (llamada repetida) aparece en 7 y 6 tareas de `tasks.jsonl` con 1024 y 2048 tokens,
+y en 4 y 3 del OOD; el control no lo tiene en `tasks.jsonl` y lo tiene en 2 tareas del OOD (o19 y o20).
+
+Sumando los dos bancos con 2048 tokens, el SFT acierta 16 de 40 tareas frente a 23 del control, tiene éxito fiel
+en 12 frente a 7, y 10 de 36 respuestas correctas y trazables frente a 0 de 36.
+
+**Qué concluimos.** El SFT con estas 99 trazas no mejora el éxito de `thinking`, ni con el límite de 1024 tokens
+(ninguna época lo supera; en el OOD, 11 frente a 4-6) ni con 2048 (16 de 40 frente a 23 de 40 en los dos bancos).
+Lo que sí cambia es el comportamiento: el modelo usa las herramientas y cita el fragmento de la evidencia (con la
+época 3, entre un 17 % y un 33 % de las respuestas son correctas y trazables según el banco y el límite, frente a
+0 % del control), y en el OOD con 2048 su éxito fiel dobla al del control (8 frente a 4), aunque eso no se repite en
+`tasks.jsonl` (4 frente a 3). A cambio aparecen dos fallos que el modelo sin entrenar casi no tiene y que son
+de la misma familia: no saber parar. Uno es el bucle en el razonamiento (sobre todo en el OOD, de 6 a 8 tareas con
+cualquier época y límite), que no es sobreajuste ni se arregla del todo con más tokens. El otro es repetir la
+llamada a la herramienta en vez de dar la respuesta (sobre todo en `tasks.jsonl`). La explicación más probable
+es la falta de variedad de las trazas, que son casi todas de dosis por peso de 19 fármacos y de dos o tres pasos,
+y la decodificación con temperatura 0, que hace que un modelo que repite una vez ya no pueda salir; no lo hemos
+comprobado. Son resultados de una sola ejecución por modelo y 20 tareas, el 2048 se midió solo para la época 3,
+y la comparación con el `thinking` con ejemplos en el prompt (67 % y 47 %) no es directa, porque el SFT se
+entrena y se evalúa sin ejemplos. Queda como trabajo futuro entrenar con tareas más variadas y con trazas que
+acaben justo tras el resultado (escritas sin repetir fármacos ni formulaciones del banco OOD), y probar GRPO con
+la tasa de acierto de las herramientas como recompensa.
