@@ -3699,16 +3699,32 @@ etiqueta (100 % de las llamadas) y cita bien. En la época 1 pasa otra cosa: el 
 el hábito de calcular, y responde con `final_answer` haciendo la cuenta de cabeza (éxito fiel 0/20 en los dos
 bancos).
 
-PENDIENTE: resultado de repetir el OOD con `ARCA_MAX_NEW_TOKENS=2048` para el SFT de la época 3 y para el
-control (`reports/fix/agent_sft/fixagent_sft_sft_ood_2048.*` y `..._control_ood_2048.*`).
+Para saber si los pasos truncados eran bucles o razonamiento largo, repetimos el OOD con 2048 tokens
+(`ARCA_MAX_NEW_TOKENS=2048`) para el SFT de la época 3 y para el control:
 
-**Qué concluimos.** El SFT con estas 99 trazas no mejora el éxito de `thinking`: ninguna época supera al control
-en ningún banco, y en el OOD la diferencia (11 frente a 4-6) es mucho mayor que el ruido de 1 a 3 tareas que
-medimos. Lo que sí cambia es el comportamiento: usa las herramientas con el formato correcto y cita el
-fragmento, algo que el modelo sin ejemplos no hace. En el banco de tareas, la época 3 casi elimina los pasos
-truncados (1 de 20). Fuera de ese terreno se desmanda: los bucles se mantienen en 7-8 tareas del OOD en las tres
-épocas, así que no son sobreajuste ni se arreglan parando antes. Lo más probable es la falta de variedad, porque
-las trazas son casi todas de dosis por peso de 19 fármacos y el OOD pide concentraciones, mL de ampolla y sumas.
-Un resultado de una sola ejecución por modelo y 20 tareas no permite más precisión que esa. Queda como trabajo
-futuro entrenar con tareas más variadas (escritas sin repetir fármacos ni formulaciones del banco OOD) y probar
-GRPO con la tasa de acierto de las herramientas como recompensa.
+| OOD, 2048 tokens | éxito | fiel | trazable (de 18) | no llega a respuesta | latencia media |
+|---|---|---|---|---|---|
+| Control | 11 | 4 | 0 | 0 | 97 s |
+| SFT, época 3 | 9 | 8 | 6 | 7 | 130 s |
+
+El SFT recupera cinco tareas respecto a 1024 (de 4 a 9), así que parte de lo que parecían bucles era razonamiento
+largo. El éxito fiel pasa a ser el doble que el del control (8 frente a 4) y 6 respuestas son correctas y
+trazables, frente a ninguna del control. Aun así, en 6 tareas (o01, o07, o09, o12, o17 y o19) un paso sigue sin
+cerrarse con más de 5000 caracteres, y en tres de ellas (o07, o12 y o17) el texto es muy repetitivo (menos de 25 palabras
+distintas en las últimas 80), así que los bucles existen aunque son menos de los que parecían. El control no tiene
+ninguna. El control da el mismo éxito (11) con los dos límites.
+
+**Qué concluimos.** Con el límite de 1024 tokens el SFT queda por debajo del control en éxito (ninguna época lo
+supera, y en el OOD la diferencia, 11 frente a 4-6, es mucho mayor que el ruido de 1 a 3 tareas que medimos). Con
+2048 tokens la diferencia en éxito se reduce a dos tareas (9 frente a 11, dentro del ruido), y el SFT gana donde
+nos interesaba: el éxito fiel se duplica (8 frente a 4) y un 33 % de las respuestas son correctas y trazables,
+frente a 0 % del control. Es decir, el SFT sí enseña el hábito de usar las herramientas y citar el fragmento,
+pero a cambio razona más largo y a veces entra en bucle, y con el límite de 1024 de los cerebros locales ese
+coste se paga en éxito. En el banco de tareas la época 3 casi elimina los pasos truncados (1 de 20) y en el OOD
+siguen en 7-8 tareas en las tres épocas, así que no es sobreajuste ni se arregla parando antes. Lo más probable es
+la falta de variedad: las trazas son casi todas de dosis por peso de 19 fármacos y el OOD pide concentraciones, mL
+de ampolla y sumas. Son resultados de una sola ejecución por modelo y 20 tareas, y el 2048 solo se midió en el OOD
+y en el modelo de la época 3, así que no podemos afirmar más; la comparación con el `thinking` con ejemplos en el
+prompt (67 % y 47 %) no es directa porque el SFT se entrena y evalúa sin ejemplos. Queda como trabajo futuro
+repetir el 2048 en `tasks.jsonl`, entrenar con tareas más variadas (escritas sin repetir fármacos ni
+formulaciones del banco OOD) y probar GRPO con la tasa de acierto de las herramientas como recompensa.
