@@ -3714,17 +3714,38 @@ cerrarse con más de 5000 caracteres, y en tres de ellas (o07, o12 y o17) el tex
 distintas en las últimas 80), así que los bucles existen aunque son menos de los que parecían. El control no tiene
 ninguna. El control da el mismo éxito (11) con los dos límites.
 
-**Qué concluimos.** Con el límite de 1024 tokens el SFT queda por debajo del control en éxito (ninguna época lo
-supera, y en el OOD la diferencia, 11 frente a 4-6, es mucho mayor que el ruido de 1 a 3 tareas que medimos). Con
-2048 tokens la diferencia en éxito se reduce a dos tareas (9 frente a 11, dentro del ruido), y el SFT gana donde
-nos interesaba: el éxito fiel se duplica (8 frente a 4) y un 33 % de las respuestas son correctas y trazables,
-frente a 0 % del control. Es decir, el SFT sí enseña el hábito de usar las herramientas y citar el fragmento,
-pero a cambio razona más largo y a veces entra en bucle, y con el límite de 1024 de los cerebros locales ese
-coste se paga en éxito. En el banco de tareas la época 3 casi elimina los pasos truncados (1 de 20) y en el OOD
-siguen en 7-8 tareas en las tres épocas, así que no es sobreajuste ni se arregla parando antes. Lo más probable es
-la falta de variedad: las trazas son casi todas de dosis por peso de 19 fármacos y el OOD pide concentraciones, mL
-de ampolla y sumas. Son resultados de una sola ejecución por modelo y 20 tareas, y el 2048 solo se midió en el OOD
-y en el modelo de la época 3, así que no podemos afirmar más; la comparación con el `thinking` con ejemplos en el
-prompt (67 % y 47 %) no es directa porque el SFT se entrena y evalúa sin ejemplos. Queda como trabajo futuro
-repetir el 2048 en `tasks.jsonl`, entrenar con tareas más variadas (escritas sin repetir fármacos ni
-formulaciones del banco OOD) y probar GRPO con la tasa de acierto de las herramientas como recompensa.
+Repetimos lo mismo en `tasks.jsonl`:
+
+| `tasks.jsonl`, 2048 tokens | éxito | fiel | trazable (de 18) | no llega a respuesta | latencia media |
+|---|---|---|---|---|---|
+| Control | 12 | 3 | 0 | 2 | 96 s |
+| SFT, época 3 | 7 | 4 | 4 | 10 | 110 s |
+
+Aquí el límite de 2048 no recupera nada (el SFT tenía 8 con 1024 y tiene 7), y la distancia con el control es de
+cinco tareas. La causa es otra. Solo en tres tareas (t01, t10 y t16) un paso se queda sin cerrar; en seis tareas
+el modelo hace la misma llamada a una herramienta una y otra vez hasta que el agente la corta con el aviso de
+llamada repetida y el de bucle. Por ejemplo, en t02 calcula bien `15 * 60 / 2 = 450` en el primer paso y repite
+exactamente esa llamada en los dos siguientes sin llamar nunca a `final_answer`; en t05 pasa lo mismo con
+`1050 / 50 = 21`. En esas dos tareas el valor correcto ya estaba calculado y la tarea se pierde solo por no
+entregarlo. Este segundo fallo (llamada repetida) aparece en 7 y 6 tareas de `tasks.jsonl` con 1024 y 2048 tokens,
+y en 4 y 3 del OOD; el control no lo tiene en `tasks.jsonl` y lo tiene en 2 tareas del OOD (o19 y o20).
+
+Sumando los dos bancos con 2048 tokens, el SFT acierta 16 de 40 tareas frente a 23 del control, tiene éxito fiel
+en 12 frente a 7, y 10 de 36 respuestas correctas y trazables frente a 0 de 36.
+
+**Qué concluimos.** El SFT con estas 99 trazas no mejora el éxito de `thinking`, ni con el límite de 1024 tokens
+(ninguna época lo supera; en el OOD, 11 frente a 4-6) ni con 2048 (16 de 40 frente a 23 de 40 en los dos bancos).
+Lo que sí cambia es el comportamiento: el modelo usa las herramientas y cita el fragmento de la evidencia (con la
+época 3, entre un 17 % y un 33 % de las respuestas son correctas y trazables según el banco y el límite, frente a
+0 % del control), y en el OOD con 2048 su éxito fiel dobla al del control (8 frente a 4), aunque eso no se repite en
+`tasks.jsonl` (4 frente a 3). A cambio aparecen dos fallos que el modelo sin entrenar casi no tiene y que son
+de la misma familia: no saber parar. Uno es el bucle en el razonamiento (sobre todo en el OOD, de 6 a 8 tareas con
+cualquier época y límite), que no es sobreajuste ni se arregla del todo con más tokens. El otro es repetir la
+llamada a la herramienta en vez de dar la respuesta (sobre todo en `tasks.jsonl`). La explicación más probable
+es la falta de variedad de las trazas, que son casi todas de dosis por peso de 19 fármacos y de dos o tres pasos,
+y la decodificación con temperatura 0, que hace que un modelo que repite una vez ya no pueda salir; no lo hemos
+comprobado. Son resultados de una sola ejecución por modelo y 20 tareas, el 2048 se midió solo para la época 3,
+y la comparación con el `thinking` con ejemplos en el prompt (67 % y 47 %) no es directa, porque el SFT se
+entrena y se evalúa sin ejemplos. Queda como trabajo futuro entrenar con tareas más variadas y con trazas que
+acaben justo tras el resultado (escritas sin repetir fármacos ni formulaciones del banco OOD), y probar GRPO con
+la tasa de acierto de las herramientas como recompensa.
