@@ -3263,7 +3263,7 @@ La tabla de trazabilidad generada es la siguiente:
 | Incorrecto, con la evidencia recuperada pero sin cita válida de ella | 1/18 (6 %) | 4/18 (22 %) | 0/18 (0 %) |
 | **Total** | 18/18 (100 %) | 18/18 (100 %) | 18/18 (100 %) |
 
-Como podemos observar, el agente con el cerebro `thinking` vuelve a presentar el mejor rendimiento.Éste devuelve la respuesta y la cita correctas en un 44% de las ocasiones, siendo un 28% de los fallos en la cita debidos a que el retriever no extrajo los chunks correctos. Por lo tanto, este no es un fallo de la capacidad del agente para citar.
+Como podemos observar, el agente con el cerebro `thinking` vuelve a presentar el mejor rendimiento. Éste devuelve la respuesta y la cita correctas en un 44% de las ocasiones, siendo un 28% de los fallos en la cita debidos a que el retriever no extrajo los chunks correctos. Por lo tanto, este no es un fallo de la capacidad del agente para citar.
 
 En un 17% de las ocasiones, el agente devuelve citas con un formato válido pero de fichas incorrectas y, en un 11% de los casos, la cita es la correcta pero el agente comete un fallo de cálculo o lectura
 
@@ -3334,7 +3334,7 @@ A continuación podemos ver cómo el modelo `thinking` no llega a usar las herra
 | El valor aparece pero sin la unidad correcta o fuera de la respuesta final (lucky hit) | 0/20 (0 %) | 0/20 (0 %) | 0/20 (0 %) |
 | Usa las herramientas necesarias pero el resultado es incorrecto | 1/20 (5 %) | 0/20 (0 %) | 1/20 (5 %) |
 
-Por último, podemos ver cómo ahora el modelo cita bien en un 67% de los casos frente a un 44% de la ejecución realizada el 2026-11-17. De esos 4 nuevos aciertos, 3 eran los tres de la cuarta clase (Correcto con citas válidas, pero no de la ficha que contiene la evidencia). Por lo tanto, podemos concluir que el ejemplo inlcuido en el prompt ayuda al agente y mejora su rendimiento.
+Por último, podemos ver cómo ahora el modelo cita bien en un 67% de los casos frente a un 44% de la ejecución realizada el 2026-11-17. De esos 4 nuevos aciertos, 3 eran los tres de la cuarta clase (Correcto con citas válidas, pero no de la ficha que contiene la evidencia). Por lo tanto, podemos concluir que el ejemplo incluido en el prompt ayuda al agente y mejora su rendimiento.
 
 | Clase | base | rlm | thinking |
 |---|---|---|---|
