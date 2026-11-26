@@ -2804,7 +2804,13 @@ Las preguntas sin resolver son las mismas salvo al aumentar el chunk_size debido
 **Qué hicimos.** Para saber si el cambio mejoraba el agente ejecutamos el siguiente comando:
 
 ```
+uv run python -m agent.evaluate --bench agent/bench/tasks.jsonl --brains base rlm thinking --out reports/agent/phase4_eval_exp5.json
+```
 
+Y para obtener más información sobre los resultados y dónde ha fallado el modelo ejecutamos este comando:
+
+```
+uv run python -m agent.analyze_eval --report reports/agent/phase4_eval_exp5.json
 ```
 
 **Qué pasó.** Recuperando los resultados del dichero `reports/fix/05/phase4_eval_exp5.json`, construimos la siguiente tabla escribiendo entre paréntesis, el valor de la evaluación llevada a cabo el 2026-11-11:
